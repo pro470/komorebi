@@ -1,3 +1,5 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use clap::ValueEnum;
 
 use serde::Deserialize;
@@ -6,7 +8,7 @@ use strum::Display;
 use strum::EnumString;
 
 #[derive(
-    Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, ValueEnum,
+    Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[strum(serialize_all = "snake_case")]

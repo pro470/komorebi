@@ -1,14 +1,15 @@
-use std::collections::VecDeque;
-
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use getset::Getters;
 use nanoid::nanoid;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::VecDeque;
 
 use crate::ring::Ring;
 use crate::window::Window;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Getters)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Getters, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Container {
     #[getset(get = "pub")]

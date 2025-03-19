@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
-
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use color_eyre::eyre::anyhow;
 use color_eyre::eyre::bail;
 use color_eyre::Result;
@@ -11,6 +9,9 @@ use getset::MutGetters;
 use getset::Setters;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
 
 use crate::core::Rect;
 
@@ -26,7 +27,17 @@ use crate::DEFAULT_CONTAINER_PADDING;
 use crate::DEFAULT_WORKSPACE_PADDING;
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, Getters, CopyGetters, MutGetters, Setters, PartialEq,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Getters,
+    CopyGetters,
+    MutGetters,
+    Setters,
+    PartialEq,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Monitor {

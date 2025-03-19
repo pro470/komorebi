@@ -40,6 +40,8 @@ use crate::REGEX_IDENTIFIERS;
 use crate::SLOW_APPLICATION_COMPENSATION_TIME;
 use crate::SLOW_APPLICATION_IDENTIFIERS;
 use crate::WSL2_UI_PROCESSES;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use color_eyre::eyre;
 use color_eyre::Result;
 use crossbeam_utils::atomic::AtomicConsume;
@@ -64,7 +66,7 @@ use windows::Win32::Foundation::HWND;
 pub static MINIMUM_WIDTH: AtomicI32 = AtomicI32::new(0);
 pub static MINIMUM_HEIGHT: AtomicI32 = AtomicI32::new(0);
 
-#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Window {
     pub hwnd: isize,

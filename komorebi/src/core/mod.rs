@@ -1,15 +1,16 @@
 #![warn(clippy::all)]
 #![allow(clippy::missing_errors_doc, clippy::use_self, clippy::doc_markdown)]
 
-use std::path::Path;
-use std::path::PathBuf;
-use std::str::FromStr;
-
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use clap::ValueEnum;
 use color_eyre::eyre::anyhow;
 use color_eyre::Result;
 use serde::Deserialize;
 use serde::Serialize;
+use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
 use strum::Display;
 use strum::EnumString;
 
@@ -242,14 +243,28 @@ impl FromStr for SocketMessage {
     }
 }
 
-#[derive(Default, Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Default, Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct SubscribeOptions {
     /// Only emit notifications when the window manager state has changed
     pub filter_state_changes: bool,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Display, Serialize, Deserialize, ValueEnum)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Display,
+    Serialize,
+    Deserialize,
+    ValueEnum,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum StackbarMode {
     Always,
@@ -257,7 +272,9 @@ pub enum StackbarMode {
     OnStack,
 }
 
-#[derive(Debug, Copy, Default, Clone, Eq, PartialEq, Display, Serialize, Deserialize)]
+#[derive(
+    Debug, Copy, Default, Clone, Eq, PartialEq, Display, Serialize, Deserialize, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum StackbarLabel {
     #[default]
@@ -266,7 +283,18 @@ pub enum StackbarLabel {
 }
 
 #[derive(
-    Default, Copy, Clone, Debug, Eq, PartialEq, Display, Serialize, Deserialize, ValueEnum,
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Display,
+    Serialize,
+    Deserialize,
+    ValueEnum,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum BorderStyle {
@@ -280,7 +308,18 @@ pub enum BorderStyle {
 }
 
 #[derive(
-    Default, Copy, Clone, Debug, Eq, PartialEq, Display, Serialize, Deserialize, ValueEnum,
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Display,
+    Serialize,
+    Deserialize,
+    ValueEnum,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum BorderImplementation {
@@ -304,6 +343,8 @@ pub enum BorderImplementation {
     PartialEq,
     Eq,
     Hash,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum WindowKind {
@@ -315,7 +356,9 @@ pub enum WindowKind {
     Floating,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum StateQuery {
     FocusedMonitorIndex,
@@ -326,7 +369,18 @@ pub enum StateQuery {
 }
 
 #[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Display, EnumString, ValueEnum,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum ApplicationIdentifier {
@@ -340,7 +394,19 @@ pub enum ApplicationIdentifier {
     Path,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Display, EnumString, ValueEnum)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum FocusFollowsMouseImplementation {
     /// A custom FFM implementation (slightly more CPU-intensive)
@@ -349,7 +415,7 @@ pub enum FocusFollowsMouseImplementation {
     Windows,
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct WindowManagementBehaviour {
     /// The current WindowContainerBehaviour to be used
@@ -361,7 +427,18 @@ pub struct WindowManagementBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum WindowContainerBehaviour {
@@ -372,7 +449,19 @@ pub enum WindowContainerBehaviour {
     Append,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Display, EnumString, ValueEnum)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum MoveBehaviour {
     /// Swap the window container with the window container at the edge of the adjacent monitor
@@ -383,7 +472,19 @@ pub enum MoveBehaviour {
     NoOp,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum CrossBoundaryBehaviour {
     /// Attempt to perform actions across a workspace boundary
@@ -392,7 +493,19 @@ pub enum CrossBoundaryBehaviour {
     Monitor,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum HidingBehaviour {
     /// Use the SW_HIDE flag to hide windows when switching workspaces (has issues with Electron apps)
@@ -403,7 +516,19 @@ pub enum HidingBehaviour {
     Cloak,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Display, EnumString, ValueEnum)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum OperationBehaviour {
     /// Process komorebic commands on temporarily unmanaged/floated windows
@@ -412,7 +537,9 @@ pub enum OperationBehaviour {
     NoOp,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum Sizing {
     Increase,

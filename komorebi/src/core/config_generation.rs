@@ -1,3 +1,5 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use clap::ValueEnum;
 use color_eyre::Result;
 use serde::Deserialize;
@@ -50,7 +52,7 @@ impl ApplicationOptions {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum MatchingRule {
@@ -67,7 +69,7 @@ pub struct WorkspaceMatchingRule {
     pub initial_only: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct IdWithIdentifier {
     pub kind: ApplicationIdentifier,
@@ -76,7 +78,7 @@ pub struct IdWithIdentifier {
     pub matching_strategy: Option<MatchingStrategy>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Display)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Display, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum MatchingStrategy {
     Legacy,

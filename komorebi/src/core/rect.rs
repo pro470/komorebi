@@ -1,8 +1,12 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use serde::Deserialize;
 use serde::Serialize;
 use windows::Win32::Foundation::RECT;
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(
+    Debug, Default, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Rect {
     /// The left point in a Win32 Rect

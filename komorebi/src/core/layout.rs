@@ -1,3 +1,5 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -6,7 +8,7 @@ use super::CustomLayout;
 use super::DefaultLayout;
 use super::Direction;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum Layout {
     Default(DefaultLayout),

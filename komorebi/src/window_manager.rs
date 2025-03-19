@@ -1,3 +1,15 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
+use color_eyre::eyre::anyhow;
+use color_eyre::eyre::bail;
+use color_eyre::Result;
+use crossbeam_channel::Receiver;
+use hotwatch::notify::ErrorKind as NotifyErrorKind;
+use hotwatch::EventKind;
+use hotwatch::Hotwatch;
+use parking_lot::Mutex;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -10,17 +22,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
-use color_eyre::eyre::anyhow;
-use color_eyre::eyre::bail;
-use color_eyre::Result;
-use crossbeam_channel::Receiver;
-use hotwatch::notify::ErrorKind as NotifyErrorKind;
-use hotwatch::EventKind;
-use hotwatch::Hotwatch;
-use parking_lot::Mutex;
-use serde::Deserialize;
-use serde::Serialize;
 use uds_windows::UnixListener;
 use uds_windows::UnixStream;
 
@@ -125,7 +126,7 @@ pub struct WindowManager {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct State {
     pub monitors: Ring<Monitor>,

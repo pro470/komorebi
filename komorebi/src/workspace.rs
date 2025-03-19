@@ -1,9 +1,5 @@
-use std::collections::VecDeque;
-use std::fmt::Display;
-use std::fmt::Formatter;
-use std::num::NonZeroUsize;
-use std::sync::atomic::Ordering;
-
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use color_eyre::eyre::anyhow;
 use color_eyre::Result;
 use getset::CopyGetters;
@@ -12,6 +8,11 @@ use getset::MutGetters;
 use getset::Setters;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::VecDeque;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::num::NonZeroUsize;
+use std::sync::atomic::Ordering;
 
 use crate::border_manager;
 use crate::core::Axis;
@@ -43,7 +44,17 @@ use crate::REMOVE_TITLEBARS;
 
 #[allow(clippy::struct_field_names)]
 #[derive(
-    Debug, Clone, Serialize, Deserialize, Getters, CopyGetters, MutGetters, Setters, PartialEq,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Getters,
+    CopyGetters,
+    MutGetters,
+    Setters,
+    PartialEq,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Workspace {
@@ -95,7 +106,9 @@ pub struct Workspace {
     pub workspace_config: Option<WorkspaceConfig>,
 }
 
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum WorkspaceLayer {
     #[default]
@@ -163,6 +176,8 @@ pub enum WorkspaceWindowLocation {
     MutGetters,
     Setters,
     PartialEq,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Settings setup either by the parent monitor or by the `WindowManager`

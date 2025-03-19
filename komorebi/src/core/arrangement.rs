@@ -1,8 +1,9 @@
-use std::num::NonZeroUsize;
-
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use clap::ValueEnum;
 use serde::Deserialize;
 use serde::Serialize;
+use std::num::NonZeroUsize;
 use strum::Display;
 use strum::EnumString;
 
@@ -602,7 +603,19 @@ impl Arrangement for CustomLayout {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum Axis {
     Horizontal,

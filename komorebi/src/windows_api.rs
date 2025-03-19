@@ -1,13 +1,13 @@
+use bevy_reflect::Reflect;
+use color_eyre::eyre::anyhow;
+use color_eyre::eyre::bail;
+use color_eyre::eyre::Error;
+use color_eyre::Result;
 use core::ffi::c_void;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::mem::size_of;
-
-use color_eyre::eyre::anyhow;
-use color_eyre::eyre::bail;
-use color_eyre::eyre::Error;
-use color_eyre::Result;
 use windows::core::Result as WindowsCrateResult;
 use windows::core::PCWSTR;
 use windows::core::PWSTR;
@@ -230,6 +230,7 @@ impl<T> ProcessWindowsCrateResult<T> for WindowsCrateResult<T> {
     }
 }
 
+#[derive(Reflect)]
 pub struct WindowsApi;
 
 impl WindowsApi {
