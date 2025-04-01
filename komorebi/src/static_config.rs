@@ -444,7 +444,6 @@ pub struct StaticConfig {
     pub animation: Option<AnimationsConfig>,
     /// Theme configuration options
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[reflect(ignore)]
     pub theme: Option<KomorebiTheme>,
     /// Identify applications which are slow to send initial event notifications
     #[serde(skip_serializing_if = "Option::is_none")]
