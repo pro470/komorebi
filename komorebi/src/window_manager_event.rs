@@ -1,8 +1,9 @@
-use std::fmt::Display;
-use std::fmt::Formatter;
-
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 use crate::window::should_act;
 use crate::window::Window;
@@ -11,7 +12,7 @@ use crate::OBJECT_NAME_CHANGE_ON_LAUNCH;
 use crate::OBJECT_NAME_CHANGE_TITLE_IGNORE_LIST;
 use crate::REGEX_IDENTIFIERS;
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "content")]
 pub enum WindowManagerEvent {

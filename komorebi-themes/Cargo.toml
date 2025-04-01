@@ -12,3 +12,5 @@ schemars = { workspace = true }
 serde = { workspace = true }
 serde_variant = "0.1"
 strum = { workspace = true }
+bevy_reflect = { workspace = true }
+bevy_ecs = { workspace = true }

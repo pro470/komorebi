@@ -300,7 +300,9 @@ impl RenderDispatcher for TransparencyRenderDispatcher {
     }
 }
 
-#[derive(Copy, Clone, Debug, Display, EnumString, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Display, EnumString, Serialize, Deserialize, PartialEq, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AspectRatio {
@@ -316,7 +318,19 @@ impl Default for AspectRatio {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Display, EnumString, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Display,
+    EnumString,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum PredefinedAspectRatio {
     /// 21:9
@@ -851,7 +865,7 @@ impl Window {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Reflect, Component)]
 pub struct RuleDebug {
     pub should_manage: bool,
     pub is_window: bool,
@@ -861,7 +875,9 @@ pub struct RuleDebug {
     pub is_cloaked: bool,
     pub allow_cloaked: bool,
     pub allow_layered_transparency: bool,
+    #[reflect(ignore)]
     pub window_style: Option<WindowStyle>,
+    #[reflect(ignore)]
     pub extended_window_style: Option<ExtendedWindowStyle>,
     pub title: Option<String>,
     pub exe_name: Option<String>,

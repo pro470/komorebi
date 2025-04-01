@@ -45,7 +45,7 @@ pub mod operation_direction;
 pub mod pathext;
 pub mod rect;
 
-#[derive(Clone, Debug, Serialize, Deserialize, Display)]
+#[derive(Clone, Debug, Serialize, Deserialize, Display, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "content")]
 pub enum SocketMessage {

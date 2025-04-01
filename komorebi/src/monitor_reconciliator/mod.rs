@@ -15,6 +15,8 @@ use crate::WindowsApi;
 use crate::DISPLAY_INDEX_PREFERENCES;
 use crate::DUPLICATE_MONITOR_SERIAL_IDS;
 use crate::WORKSPACE_MATCHING_RULES;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
 use crossbeam_utils::atomic::AtomicConsume;
@@ -26,8 +28,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use bevy_ecs::component::Component;
-use bevy_reflect::Reflect;
 
 pub mod hidden;
 

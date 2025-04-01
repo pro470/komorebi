@@ -31,8 +31,15 @@ pub mod winevent_listener;
 pub mod workspace;
 pub mod workspace_reconciliator;
 
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
+pub use colour::*;
+pub use core::*;
 use lazy_static::lazy_static;
 use monitor_reconciliator::MonitorNotification;
+pub use process_command::*;
+pub use process_event::*;
+pub use static_config::*;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fs::File;
@@ -46,12 +53,6 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
-pub use colour::*;
-pub use core::*;
-pub use process_command::*;
-pub use process_event::*;
-pub use static_config::*;
 pub use window::*;
 pub use window_manager::*;
 pub use window_manager_event::*;
@@ -282,7 +283,7 @@ pub fn current_virtual_desktop() -> Option<Vec<u8>> {
     current
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum NotificationEvent {
@@ -291,7 +292,7 @@ pub enum NotificationEvent {
     Monitor(MonitorNotification),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Notification {
     pub event: NotificationEvent,

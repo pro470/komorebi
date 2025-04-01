@@ -8,11 +8,13 @@ use strum::Display;
 use strum::IntoEnumIterator;
 
 pub use base16_egui_themes::Base16;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 pub use catppuccin_egui;
 pub use eframe::egui::Color32;
 use serde_variant::to_variant_name;
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Component)]
 #[serde(tag = "type")]
 pub enum Theme {
     /// A theme from catppuccin-egui
@@ -49,7 +51,19 @@ impl Theme {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, JsonSchema, Display, PartialEq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Display,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 pub enum Base16Value {
     Base00,
     Base01,
@@ -93,7 +107,9 @@ impl Base16Value {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Display, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Display, PartialEq, Reflect, Component,
+)]
 pub enum Catppuccin {
     Frappe,
     Latte,
@@ -118,7 +134,19 @@ impl From<Catppuccin> for catppuccin_egui::Theme {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, JsonSchema, Display, PartialEq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Display,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 pub enum CatppuccinValue {
     Rosewater,
     Flamingo,

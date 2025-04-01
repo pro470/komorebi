@@ -1,3 +1,5 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use hex_color::HexColor;
 use komorebi_themes::Color32;
 #[cfg(feature = "schemars")]
@@ -12,7 +14,7 @@ use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum Colour {
@@ -56,8 +58,8 @@ impl From<Colour> for Color32 {
     }
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Hex(HexColor);
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
+pub struct Hex(#[reflect(ignore)] HexColor);
 
 #[cfg(feature = "schemars")]
 impl schemars::JsonSchema for Hex {
@@ -84,7 +86,7 @@ impl From<Colour> for u32 {
     }
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Rgb {
     /// Red

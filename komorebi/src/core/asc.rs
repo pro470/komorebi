@@ -1,6 +1,8 @@
 use crate::config_generation::ApplicationConfiguration;
 use crate::config_generation::ApplicationOptions;
 use crate::config_generation::MatchingRule;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use color_eyre::Result;
 use serde::Deserialize;
 use serde::Serialize;
@@ -9,11 +11,11 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ApplicationSpecificConfiguration(pub BTreeMap<String, AscApplicationRulesOrSchema>);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AscApplicationRulesOrSchema {
@@ -47,7 +49,7 @@ impl ApplicationSpecificConfiguration {
 }
 
 /// Rules that determine how an application is handled
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct AscApplicationRules {
     /// Rules to ignore specific windows

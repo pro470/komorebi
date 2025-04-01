@@ -1,14 +1,15 @@
 use crate::animation::animation_manager::AnimationManager;
 use crate::core::animation::AnimationStyle;
 
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use prefix::AnimationPrefix;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-
-use parking_lot::Mutex;
 
 pub use engine::AnimationEngine;
 pub mod animation_manager;
@@ -22,7 +23,7 @@ pub mod style;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum PerAnimationPrefixConfig<T> {

@@ -1,3 +1,5 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use clap::ValueEnum;
 
 use serde::Deserialize;
@@ -5,7 +7,19 @@ use serde::Serialize;
 use strum::Display;
 use strum::EnumString;
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum AnimationStyle {
     Linear,

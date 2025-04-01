@@ -102,7 +102,7 @@ use std::sync::Arc;
 use uds_windows::UnixListener;
 use uds_windows::UnixStream;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct BorderColours {
     /// Border colour when the container contains a single window
@@ -245,7 +245,7 @@ impl From<&Workspace> for WorkspaceConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct MonitorConfig {
     /// Workspace configurations
@@ -304,7 +304,7 @@ impl From<&Monitor> for MonitorConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AppSpecificConfigurationPath {
@@ -314,7 +314,7 @@ pub enum AppSpecificConfigurationPath {
     Multiple(Vec<PathBuf>),
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// The `komorebi.json` static configuration file reference for `v0.1.35`
 pub struct StaticConfig {
@@ -444,6 +444,7 @@ pub struct StaticConfig {
     pub animation: Option<AnimationsConfig>,
     /// Theme configuration options
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[reflect(ignore)]
     pub theme: Option<KomorebiTheme>,
     /// Identify applications which are slow to send initial event notifications
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -463,7 +464,7 @@ pub struct StaticConfig {
     pub floating_window_aspect_ratio: Option<AspectRatio>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct AnimationsConfig {
     /// Enable or disable animations (default: false)
@@ -479,9 +480,10 @@ pub struct AnimationsConfig {
     pub fps: Option<u64>,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Component, Reflect)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "palette")]
+#[reflect(opaque)]
 pub enum KomorebiTheme {
     /// A theme from catppuccin-egui
     Catppuccin {
@@ -630,7 +632,7 @@ impl StaticConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct TabsConfig {
     /// Width of a stackbar tab
@@ -653,7 +655,7 @@ pub struct TabsConfig {
     pub font_size: Option<i32>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct StackbarConfig {
     /// Stackbar height

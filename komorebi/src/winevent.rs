@@ -1,5 +1,6 @@
 #![allow(clippy::use_self)]
 
+use bevy_reflect::Reflect;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
@@ -88,7 +89,7 @@ use windows::Win32::UI::WindowsAndMessaging::EVENT_UIA_EVENTID_START;
 use windows::Win32::UI::WindowsAndMessaging::EVENT_UIA_PROPID_END;
 use windows::Win32::UI::WindowsAndMessaging::EVENT_UIA_PROPID_START;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Display)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Display, Reflect)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[repr(u32)]
 #[allow(dead_code)]

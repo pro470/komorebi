@@ -2992,6 +2992,8 @@ name = "komorebi-themes"
 version = "0.1.35"
 dependencies = [
  "base16-egui-themes",
+ "bevy_ecs",
+ "bevy_reflect",
  "catppuccin-egui",
  "eframe",
  "schemars",

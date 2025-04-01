@@ -12,6 +12,8 @@ use crate::Colour;
 use crate::Rgb;
 use crate::WindowManager;
 use crate::WindowsApi;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use border::border_hwnds;
 pub use border::Border;
 use crossbeam_channel::Receiver;
@@ -74,7 +76,7 @@ impl Deref for RenderTarget {
 
 pub struct Notification(pub Option<isize>);
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Reflect, Component)]
 pub struct BorderInfo {
     pub border_hwnd: isize,
     pub window_kind: WindowKind,
@@ -713,7 +715,7 @@ pub fn hide_border(tracking_hwnd: isize) {
     });
 }
 
-#[derive(Debug, Copy, Clone, Display, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Copy, Clone, Display, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum ZOrder {
     Top,
