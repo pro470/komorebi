@@ -1959,6 +1959,9 @@ impl WindowManager {
             SocketMessage::Theme(theme) => {
                 theme_manager::send_notification(theme);
             }
+            SocketMessage::ApplyState(ref state) => {
+                self.apply_state(state.clone());
+            }
             // Deprecated commands
             SocketMessage::AltFocusHack(_)
             | SocketMessage::IdentifyBorderOverflowApplication(_, _) => {}
