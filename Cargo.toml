@@ -12,6 +12,7 @@ members = [
 ]
 
 [workspace.dependencies]
+bevy_asset = "0.15.3"
 bevy_ecs = "0.15.3"
 bevy_reflect = "0.15.3"
 clap = { version = "4", features = ["derive", "wrap_help"] }

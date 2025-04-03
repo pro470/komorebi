@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 komorebi-themes = { path = "../komorebi-themes" }
 
+bevy_asset = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 bitflags = { version = "2", features = ["serde"] }

@@ -99,6 +99,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use bevy_asset::Asset;
 use uds_windows::UnixListener;
 use uds_windows::UnixStream;
 
@@ -314,7 +315,7 @@ pub enum AppSpecificConfigurationPath {
     Multiple(Vec<PathBuf>),
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Reflect, Component)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Reflect, Component, Asset)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// The `komorebi.json` static configuration file reference for `v0.1.35`
 pub struct StaticConfig {
