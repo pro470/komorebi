@@ -190,6 +190,51 @@ impl State {
 
         false
     }
+
+    pub fn has_been_modified_state(&self, new: &State) -> bool {
+
+        if self.monitors != new.monitors {
+            return true;
+        }
+
+        if self.is_paused != new.is_paused {
+            return true;
+        }
+
+        if self.new_window_behaviour != new.new_window_behaviour {
+            return true;
+        }
+
+        if self.float_override != new.float_override {
+            return true;
+        }
+
+        if self.cross_monitor_move_behaviour != new.cross_monitor_move_behaviour {
+            return true;
+        }
+
+        if self.unmanaged_window_operation_behaviour != new.unmanaged_window_operation_behaviour {
+            return true;
+        }
+
+        if self.work_area_offset != new.work_area_offset {
+            return true;
+        }
+
+        if self.focus_follows_mouse != new.focus_follows_mouse {
+            return true;
+        }
+
+        if self.mouse_follows_focus != new.mouse_follows_focus {
+            return true;
+        }
+
+        if self.has_pending_raise_op != new.has_pending_raise_op {
+            return true;
+        }
+
+        false
+    }
 }
 
 #[allow(clippy::struct_excessive_bools)]
