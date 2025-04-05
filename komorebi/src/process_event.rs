@@ -734,7 +734,7 @@ impl WindowManager {
                 event: NotificationEvent::WindowManager(event),
                 state: self.as_ref().into(),
             },
-            initial_state.has_been_modified(State::from(&*self)),
+            initial_state.has_been_modified(&State::from(&*self)),
         )?;
 
         border_manager::send_notification(Some(event.hwnd()));

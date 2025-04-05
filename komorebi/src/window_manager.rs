@@ -145,7 +145,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn has_been_modified(&self, new: State) -> bool {
+    pub fn has_been_modified(&self, new: &State) -> bool {
         if self.monitors != new.monitors {
             return true;
         }
