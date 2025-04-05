@@ -82,6 +82,7 @@ use crate::TRANSPARENCY_BLACKLIST;
 use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
 use crate::WINDOWS_11;
 use crate::WORKSPACE_MATCHING_RULES;
+use bevy_asset::Asset;
 use bevy_ecs::prelude::Component;
 use bevy_reflect::Reflect;
 use color_eyre::Result;
@@ -99,7 +100,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use bevy_asset::Asset;
 use uds_windows::UnixListener;
 use uds_windows::UnixStream;
 

@@ -9,7 +9,9 @@ use strum::EnumString;
 
 use super::ApplicationIdentifier;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component,
+)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[strum(serialize_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
