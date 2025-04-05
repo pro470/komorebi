@@ -714,7 +714,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                 event: NotificationEvent::Monitor(notification),
                 state: wm.as_ref().into(),
             },
-            initial_state.has_been_modified(&wm),
+            initial_state.has_been_modified(State::from(wm.as_ref())),
         )?;
     }
 
