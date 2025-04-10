@@ -292,7 +292,6 @@ impl BarWidget for Komorebi {
                                             komorebi_notification_state.monitor_index,
                                             i,
                                         ),
-                                        SocketMessage::RetileWithResizeDimensions,
                                         SocketMessage::MouseFollowsFocus(true),
                                     ])
                                         .is_err()
@@ -301,7 +300,6 @@ impl BarWidget for Komorebi {
                                             "could not send the following batch of messages to komorebi:\n
                                             MouseFollowsFocus(false)\n
                                             FocusMonitorWorkspaceNumber({}, {})\n
-                                            RetileWithResizeDimensions
                                             MouseFollowsFocus(true)\n",
                                             komorebi_notification_state.monitor_index,
                                             i,
@@ -312,14 +310,12 @@ impl BarWidget for Komorebi {
                                         komorebi_notification_state.monitor_index,
                                         i,
                                     ),
-                                    SocketMessage::RetileWithResizeDimensions,
                                 ])
                                     .is_err()
                                 {
                                     tracing::error!(
                                         "could not send the following batch of messages to komorebi:\n
-                                        FocusMonitorWorkspaceNumber({}, {})\n
-                                        RetileWithResizeDimensions",
+                                        FocusMonitorWorkspaceNumber({}, {})\n",
                                         komorebi_notification_state.monitor_index,
                                         i,
                                     );
@@ -472,55 +468,25 @@ impl BarWidget for Komorebi {
                 for (name, location) in configuration_switcher.configurations.iter() {
                     let path = PathBuf::from(location);
                     if path.is_file() {
-                        config.apply_on_widget(false, ui,|ui|{
-                    if SelectableFrame::new(false).show(ui, |ui|{
-                          ui.add(Label::new(name).selectable(false))
-                            })
-                            .clicked()
-                        {
-                            let canonicalized = dunce::canonicalize(path.clone()).unwrap_or(path);
-                            let mut proceed = true;
-                            if komorebi_client::send_message(&SocketMessage::ReplaceConfiguration(
-                                canonicalized,
-                            ))
-                            .is_err()
+                        config.apply_on_widget(false, ui, |ui| {
+                            if SelectableFrame::new(false)
+                                .show(ui, |ui| ui.add(Label::new(name).selectable(false)))
+                                .clicked()
                             {
-                                tracing::error!(
-                                    "could not send message to komorebi: ReplaceConfiguration"
-                                );
-                                proceed = false;
-                            }
+                                let canonicalized =
+                                    dunce::canonicalize(path.clone()).unwrap_or(path);
 
-                            if let Some(rect) = komorebi_notification_state.work_area_offset {
-                                if proceed {
-                                    match komorebi_client::send_query(&SocketMessage::Query(
-                                        komorebi_client::StateQuery::FocusedMonitorIndex,
-                                    )) {
-                                        Ok(idx) => {
-                                            if let Ok(monitor_idx) = idx.parse::<usize>() {
-                                                if komorebi_client::send_message(
-                                                    &SocketMessage::MonitorWorkAreaOffset(
-                                                        monitor_idx,
-                                                        rect,
-                                                    ),
-                                                )
-                                                .is_err()
-                                                {
-                                                    tracing::error!(
-                                                    "could not send message to komorebi: MonitorWorkAreaOffset"
-                                                );
-                                                }
-                                            }
-                                        }
-                                        Err(_) => {
-                                            tracing::error!(
-                                                "could not send message to komorebi: Query"
-                                            );
-                                        }
-                                    }
+                                if komorebi_client::send_message(
+                                    &SocketMessage::ReplaceConfiguration(canonicalized),
+                                )
+                                .is_err()
+                                {
+                                    tracing::error!(
+                                        "could not send message to komorebi: ReplaceConfiguration"
+                                    );
                                 }
                             }
-                        }});
+                        });
                     }
                 }
             }

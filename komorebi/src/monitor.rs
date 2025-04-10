@@ -12,15 +12,21 @@ use getset::Setters;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::border_manager::BORDER_ENABLED;
+use crate::border_manager::BORDER_OFFSET;
+use crate::border_manager::BORDER_WIDTH;
 use crate::core::Rect;
 
 use crate::container::Container;
 use crate::ring::Ring;
 use crate::workspace::Workspace;
+use crate::workspace::WorkspaceGlobals;
 use crate::workspace::WorkspaceLayer;
 use crate::DefaultLayout;
+use crate::FloatingLayerBehaviour;
 use crate::Layout;
 use crate::OperationDirection;
+use crate::Wallpaper;
 use crate::WindowsApi;
 use crate::DEFAULT_CONTAINER_PADDING;
 use crate::DEFAULT_WORKSPACE_PADDING;
@@ -60,6 +66,10 @@ pub struct Monitor {
     pub container_padding: Option<i32>,
     #[getset(get_copy = "pub", set = "pub")]
     pub workspace_padding: Option<i32>,
+    #[getset(get = "pub", get_mut = "pub", set = "pub")]
+    pub wallpaper: Option<Wallpaper>,
+    #[getset(get_copy = "pub", set = "pub")]
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
 }
 
 impl_ring_elements!(Monitor, Workspace);
@@ -115,6 +125,8 @@ pub fn new(
         workspace_names: HashMap::default(),
         container_padding: None,
         workspace_padding: None,
+        wallpaper: None,
+        floating_layer_behaviour: None,
     }
 }
 
@@ -156,6 +168,8 @@ impl Monitor {
             workspace_names: Default::default(),
             container_padding: None,
             workspace_padding: None,
+            wallpaper: None,
+            floating_layer_behaviour: None,
         }
     }
 
@@ -177,9 +191,11 @@ impl Monitor {
 
     pub fn load_focused_workspace(&mut self, mouse_follows_focus: bool) -> Result<()> {
         let focused_idx = self.focused_workspace_idx();
+        let hmonitor = self.id();
+        let monitor_wp = self.wallpaper.clone();
         for (i, workspace) in self.workspaces_mut().iter_mut().enumerate() {
             if i == focused_idx {
-                workspace.restore(mouse_follows_focus)?;
+                workspace.restore(mouse_follows_focus, hmonitor, &monitor_wp)?;
             } else {
                 workspace.hide(None);
             }
@@ -196,18 +212,34 @@ impl Monitor {
         let workspace_padding = self
             .workspace_padding()
             .or(Some(DEFAULT_WORKSPACE_PADDING.load(Ordering::SeqCst)));
+        let (border_width, border_offset) = {
+            let border_enabled = BORDER_ENABLED.load(Ordering::SeqCst);
+            if border_enabled {
+                let border_width = BORDER_WIDTH.load(Ordering::SeqCst);
+                let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
+                (border_width, border_offset)
+            } else {
+                (0, 0)
+            }
+        };
         let work_area = *self.work_area_size();
-        let offset = self.work_area_offset.or(offset);
+        let work_area_offset = self.work_area_offset.or(offset);
         let window_based_work_area_offset = self.window_based_work_area_offset();
-        let limit = self.window_based_work_area_offset_limit();
+        let window_based_work_area_offset_limit = self.window_based_work_area_offset_limit();
+        let floating_layer_behaviour = self.floating_layer_behaviour();
 
         for workspace in self.workspaces_mut() {
-            workspace.globals_mut().container_padding = container_padding;
-            workspace.globals_mut().workspace_padding = workspace_padding;
-            workspace.globals_mut().work_area = work_area;
-            workspace.globals_mut().work_area_offset = offset;
-            workspace.globals_mut().window_based_work_area_offset = window_based_work_area_offset;
-            workspace.globals_mut().window_based_work_area_offset_limit = limit;
+            workspace.globals = WorkspaceGlobals {
+                container_padding,
+                workspace_padding,
+                border_width,
+                border_offset,
+                work_area,
+                work_area_offset,
+                window_based_work_area_offset,
+                window_based_work_area_offset_limit,
+                floating_layer_behaviour,
+            }
         }
     }
 
@@ -219,18 +251,34 @@ impl Monitor {
         let workspace_padding = self
             .workspace_padding()
             .or(Some(DEFAULT_WORKSPACE_PADDING.load(Ordering::SeqCst)));
+        let (border_width, border_offset) = {
+            let border_enabled = BORDER_ENABLED.load(Ordering::SeqCst);
+            if border_enabled {
+                let border_width = BORDER_WIDTH.load(Ordering::SeqCst);
+                let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
+                (border_width, border_offset)
+            } else {
+                (0, 0)
+            }
+        };
         let work_area = *self.work_area_size();
-        let offset = self.work_area_offset.or(offset);
+        let work_area_offset = self.work_area_offset.or(offset);
         let window_based_work_area_offset = self.window_based_work_area_offset();
-        let limit = self.window_based_work_area_offset_limit();
+        let window_based_work_area_offset_limit = self.window_based_work_area_offset_limit();
+        let floating_layer_behaviour = self.floating_layer_behaviour();
 
         if let Some(workspace) = self.workspaces_mut().get_mut(workspace_idx) {
-            workspace.globals_mut().container_padding = container_padding;
-            workspace.globals_mut().workspace_padding = workspace_padding;
-            workspace.globals_mut().work_area = work_area;
-            workspace.globals_mut().work_area_offset = offset;
-            workspace.globals_mut().window_based_work_area_offset = window_based_work_area_offset;
-            workspace.globals_mut().window_based_work_area_offset_limit = limit;
+            workspace.globals = WorkspaceGlobals {
+                container_padding,
+                workspace_padding,
+                border_width,
+                border_offset,
+                work_area,
+                work_area_offset,
+                window_based_work_area_offset,
+                window_based_work_area_offset_limit,
+                floating_layer_behaviour,
+            }
         }
     }
 
@@ -612,5 +660,118 @@ mod tests {
 
         // Should be the last workspace index: 1
         assert_eq!(new_workspace_index, 1);
+    }
+
+    #[test]
+    fn test_move_container_to_workspace() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        let new_workspace_index = m.new_workspace_idx();
+        assert_eq!(new_workspace_index, 1);
+
+        {
+            // Create workspace 1 and add 3 containers
+            let workspace = m.focused_workspace_mut().unwrap();
+            for _ in 0..3 {
+                let container = Container::default();
+                workspace.add_container_to_back(container);
+            }
+
+            // Should have 3 containers in workspace 1
+            assert_eq!(m.focused_workspace().unwrap().containers().len(), 3);
+        }
+
+        // Create and focus workspace 2
+        m.focus_workspace(new_workspace_index).unwrap();
+
+        // Focus workspace 1
+        m.focus_workspace(0).unwrap();
+
+        // Move container to workspace 2
+        m.move_container_to_workspace(1, true, None).unwrap();
+
+        // Should be focused on workspace 2
+        assert_eq!(m.focused_workspace_idx(), 1);
+
+        // Workspace 2 should have 1 container now
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 1);
+
+        // Move to workspace 1
+        m.focus_workspace(0).unwrap();
+
+        // Workspace 1 should have 2 containers
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 2);
+
+        // Move a another container from workspace 1 to workspace 2 without following
+        m.move_container_to_workspace(1, false, None).unwrap();
+
+        // Should have 1 container
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 1);
+
+        // Should still be focused on workspace 1
+        assert_eq!(m.focused_workspace_idx(), 0);
+
+        // Switch to workspace 2
+        m.focus_workspace(1).unwrap();
+
+        // Workspace 2 should now have 2 containers
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 2);
+    }
+
+    #[test]
+    fn test_ensure_workspace_count_workspace_contains_two_workspaces() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        // Create and focus another workspace
+        let new_workspace_index = m.new_workspace_idx();
+        m.focus_workspace(new_workspace_index).unwrap();
+
+        // Should have 2 workspaces now
+        assert_eq!(m.workspaces().len(), 2, "Monitor should have 2 workspaces");
+
+        // Ensure the monitor has at least 5 workspaces
+        m.ensure_workspace_count(5);
+
+        // Monitor should have 5 workspaces
+        assert_eq!(m.workspaces().len(), 5, "Monitor should have 5 workspaces");
+    }
+
+    #[test]
+    fn test_ensure_workspace_count_only_default_workspace() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        // Ensure the monitor has at least 5 workspaces
+        m.ensure_workspace_count(5);
+
+        // Monitor should have 5 workspaces
+        assert_eq!(m.workspaces().len(), 5, "Monitor should have 5 workspaces");
+
+        // Try to call the ensure workspace count again to ensure it doesn't change
+        m.ensure_workspace_count(3);
+        assert_eq!(m.workspaces().len(), 5, "Monitor should have 5 workspaces");
     }
 }

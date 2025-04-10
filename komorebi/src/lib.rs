@@ -158,6 +158,7 @@ lazy_static! {
             matching_strategy: Option::from(MatchingStrategy::Equals),
         })
     ]));
+    static ref SESSION_FLOATING_APPLICATIONS: Arc<Mutex<Vec<MatchingRule>>> = Arc::new(Mutex::new(Vec::new()));
     static ref FLOATING_APPLICATIONS: Arc<Mutex<Vec<MatchingRule>>> = Arc::new(Mutex::new(Vec::new()));
     static ref PERMAIGNORE_CLASSES: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![
         "Chrome_RenderWidgetHostHWND".to_string(),
@@ -187,15 +188,16 @@ lazy_static! {
         Arc::new(Mutex::new(HidingBehaviour::Cloak));
     pub static ref HOME_DIR: PathBuf = {
         std::env::var("KOMOREBI_CONFIG_HOME").map_or_else(|_| dirs::home_dir().expect("there is no home directory"), |home_path| {
-            let home = PathBuf::from(&home_path);
+            let home = home_path.replace_env();
 
-            if home.as_path().is_dir() {
-                home
-            } else {
-                panic!(
-                    "$Env:KOMOREBI_CONFIG_HOME is set to '{home_path}', which is not a valid directory",
-                );
-            }
+            assert!(
+                home.is_dir(),
+                "$Env:KOMOREBI_CONFIG_HOME is set to '{}', which is not a valid directory",
+                home_path
+            );
+
+
+            home
         })
     };
     pub static ref DATA_DIR: PathBuf = dirs::data_local_dir().expect("there is no local data directory").join("komorebi");

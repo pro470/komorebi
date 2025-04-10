@@ -19,7 +19,6 @@ use crate::core::config_generation::ApplicationConfigurationGenerator;
 use crate::core::config_generation::ApplicationOptions;
 use crate::core::config_generation::MatchingRule;
 use crate::core::config_generation::MatchingStrategy;
-use crate::core::resolve_home_path;
 use crate::core::AnimationStyle;
 use crate::core::BorderImplementation;
 use crate::core::BorderStyle;
@@ -39,6 +38,7 @@ use crate::current_virtual_desktop;
 use crate::monitor;
 use crate::monitor::Monitor;
 use crate::monitor_reconciliator;
+use crate::resolve_option_hashmap_usize_path;
 use crate::ring::Ring;
 use crate::stackbar_manager::STACKBAR_FOCUSED_TEXT_COLOUR;
 use crate::stackbar_manager::STACKBAR_FONT_FAMILY;
@@ -61,6 +61,7 @@ use crate::Axis;
 use crate::CrossBoundaryBehaviour;
 use crate::FloatingLayerBehaviour;
 use crate::PredefinedAspectRatio;
+use crate::ResolvedPathBuf;
 use crate::DATA_DIR;
 use crate::DEFAULT_CONTAINER_PADDING;
 use crate::DEFAULT_WORKSPACE_PADDING;
@@ -162,10 +163,12 @@ pub struct ThemeOptions {
     pub bar_accent: Option<komorebi_themes::Base16Value>,
 }
 
+#[serde_with::serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Wallpaper {
     /// Path to the wallpaper image file
+    #[serde_as(as = "ResolvedPathBuf")]
     pub path: PathBuf,
     /// Generate and apply Base16 theme for this wallpaper (default: true)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +178,8 @@ pub struct Wallpaper {
     pub theme_options: Option<ThemeOptions>,
 }
 
+// serde_as must be before derive
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct WorkspaceConfig {
@@ -185,12 +190,14 @@ pub struct WorkspaceConfig {
     pub layout: Option<DefaultLayout>,
     /// END OF LIFE FEATURE: Custom Layout (default: None)
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<ResolvedPathBuf>")]
     pub custom_layout: Option<PathBuf>,
     /// Layout rules in the format of threshold => layout (default: None)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout_rules: Option<HashMap<usize, DefaultLayout>>,
     /// END OF LIFE FEATURE: Custom layout rules (default: None)
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "resolve_option_hashmap_usize_path", default)]
     pub custom_layout_rules: Option<HashMap<usize, PathBuf>>,
     /// Container padding (default: global)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,7 +307,7 @@ impl From<&Workspace> for WorkspaceConfig {
             window_container_behaviour_rules: Option::from(window_container_behaviour_rules),
             float_override: *value.float_override(),
             layout_flip: value.layout_flip(),
-            floating_layer_behaviour: Option::from(*value.floating_layer_behaviour()),
+            floating_layer_behaviour: value.floating_layer_behaviour(),
             wallpaper: None,
         }
     }
@@ -326,6 +333,12 @@ pub struct MonitorConfig {
     /// Workspace padding (default: global)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_padding: Option<i32>,
+    /// Specify a wallpaper for this monitor
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallpaper: Option<Wallpaper>,
+    /// Determine what happens to a new window when the Floating workspace layer is active (default: Tile)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
 }
 
 impl From<&Monitor> for MonitorConfig {
@@ -361,20 +374,24 @@ impl From<&Monitor> for MonitorConfig {
             window_based_work_area_offset_limit: Some(value.window_based_work_area_offset_limit()),
             container_padding,
             workspace_padding,
+            wallpaper: value.wallpaper().clone(),
+            floating_layer_behaviour: value.floating_layer_behaviour(),
         }
     }
 }
 
+#[serde_with::serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AppSpecificConfigurationPath {
     /// A single applications.json file
-    Single(PathBuf),
+    Single(#[serde_as(as = "ResolvedPathBuf")] PathBuf),
     /// Multiple applications.json files
-    Multiple(Vec<PathBuf>),
+    Multiple(#[serde_as(as = "Vec<ResolvedPathBuf>")] Vec<PathBuf>),
 }
 
+#[serde_with::serde_as]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// The `komorebi.json` static configuration file reference for `v0.1.36`
@@ -424,7 +441,7 @@ pub struct StaticConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(alias = "active_window_border_offset")]
     pub border_offset: Option<i32>,
-    /// Display an active window border (default: false)
+    /// Display an active window border (default: true)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(alias = "active_window_border")]
     pub border: Option<bool>,
@@ -515,6 +532,7 @@ pub struct StaticConfig {
     /// Komorebi status bar configuration files for multiple instances on different monitors
     // this option is a little special because it is only consumed by komorebic
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<Vec<ResolvedPathBuf>>")]
     pub bar_configurations: Option<Vec<PathBuf>>,
     /// HEAVILY DISCOURAGED: Identify applications for which komorebi should forcibly remove title bars
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -952,10 +970,7 @@ impl StaticConfig {
 
         border_manager::BORDER_WIDTH.store(self.border_width.unwrap_or(8), Ordering::SeqCst);
         border_manager::BORDER_OFFSET.store(self.border_offset.unwrap_or(-1), Ordering::SeqCst);
-
-        if let Some(enabled) = &self.border {
-            border_manager::BORDER_ENABLED.store(*enabled, Ordering::SeqCst);
-        }
+        border_manager::BORDER_ENABLED.store(self.border.unwrap_or(true), Ordering::SeqCst);
 
         if let Some(colours) = &self.border_colours {
             if let Some(single) = colours.single {
@@ -1167,44 +1182,7 @@ impl StaticConfig {
 
     pub fn read(path: &PathBuf) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let mut value: Self = serde_json::from_str(&content)?;
-
-        if let Some(path) = &mut value.app_specific_configuration_path {
-            match path {
-                AppSpecificConfigurationPath::Single(path) => {
-                    *path = resolve_home_path(&*path)?;
-                }
-                AppSpecificConfigurationPath::Multiple(paths) => {
-                    for path in paths {
-                        *path = resolve_home_path(&*path)?;
-                    }
-                }
-            }
-        }
-
-        if let Some(monitors) = &mut value.monitors {
-            for m in monitors {
-                for w in &mut m.workspaces {
-                    if let Some(path) = &mut w.custom_layout {
-                        *path = resolve_home_path(&*path)?;
-                    }
-
-                    if let Some(map) = &mut w.custom_layout_rules {
-                        for path in map.values_mut() {
-                            *path = resolve_home_path(&*path)?;
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(bar_configurations) = &mut value.bar_configurations {
-            for path in bar_configurations {
-                *path = resolve_home_path(&*path)?;
-            }
-        }
-
-        Ok(value)
+        serde_json::from_str(&content).map_err(Into::into)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1358,6 +1336,8 @@ impl StaticConfig {
                 );
                 monitor.set_container_padding(monitor_config.container_padding);
                 monitor.set_workspace_padding(monitor_config.workspace_padding);
+                monitor.set_wallpaper(monitor_config.wallpaper.clone());
+                monitor.set_floating_layer_behaviour(monitor_config.floating_layer_behaviour);
 
                 monitor.update_workspaces_globals(offset);
                 for (j, ws) in monitor.workspaces_mut().iter_mut().enumerate() {
@@ -1443,6 +1423,7 @@ impl StaticConfig {
                     );
                     m.set_container_padding(monitor_config.container_padding);
                     m.set_workspace_padding(monitor_config.workspace_padding);
+                    m.set_floating_layer_behaviour(monitor_config.floating_layer_behaviour);
 
                     m.update_workspaces_globals(offset);
 
@@ -1529,6 +1510,8 @@ impl StaticConfig {
                 );
                 monitor.set_container_padding(monitor_config.container_padding);
                 monitor.set_workspace_padding(monitor_config.workspace_padding);
+                monitor.set_wallpaper(monitor_config.wallpaper.clone());
+                monitor.set_floating_layer_behaviour(monitor_config.floating_layer_behaviour);
 
                 monitor.update_workspaces_globals(offset);
 
@@ -1615,6 +1598,7 @@ impl StaticConfig {
                     );
                     m.set_container_padding(monitor_config.container_padding);
                     m.set_workspace_padding(monitor_config.workspace_padding);
+                    m.set_floating_layer_behaviour(monitor_config.floating_layer_behaviour);
 
                     m.update_workspaces_globals(offset);
 
@@ -1679,6 +1663,8 @@ impl StaticConfig {
 
         for i in 0..monitor_count {
             wm.update_focused_workspace_by_monitor_idx(i)?;
+            let ws_idx = wm.focused_workspace_idx_for_monitor_idx(i)?;
+            wm.apply_wallpaper_for_monitor_workspace(i, ws_idx)?;
         }
 
         Ok(())
@@ -1767,7 +1753,6 @@ fn handle_asc_file(
         Some(ext) => match ext.to_string_lossy().to_string().as_str() {
             "yaml" => {
                 tracing::info!("loading applications.yaml from: {}", path.display());
-                let path = resolve_home_path(path)?;
                 let content = std::fs::read_to_string(path)?;
                 let asc = ApplicationConfigurationGenerator::load(&content)?;
 
@@ -1816,8 +1801,7 @@ fn handle_asc_file(
             }
             "json" => {
                 tracing::info!("loading applications.json from: {}", path.display());
-                let path = resolve_home_path(path)?;
-                let mut asc = ApplicationSpecificConfiguration::load(&path)?;
+                let mut asc = ApplicationSpecificConfiguration::load(path)?;
 
                 for entry in asc.values_mut() {
                     match entry {
@@ -1879,7 +1863,10 @@ fn handle_asc_file(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use crate::StaticConfig;
+    use crate::WorkspaceConfig;
 
     #[test]
     fn backwards_compat() {
@@ -1907,5 +1894,41 @@ mod tests {
             println!("{version}");
             StaticConfig::read_raw(&config).unwrap();
         }
+    }
+
+    #[test]
+    fn deserialize_custom_layout_rules() {
+        // set an environment variable for testing
+        std::env::set_var("VAR", "VALUE");
+
+        let config = r#"
+        {
+            "name": "Test",
+            "custom_layout_rules": {
+                "1": "path/to/dir",
+                "2": "path/to/%VAR%"
+            }
+        }
+        "#;
+        let config = serde_json::from_str::<WorkspaceConfig>(config).unwrap();
+
+        let custom_layout_rules = config.custom_layout_rules.unwrap();
+
+        assert_eq!(
+            custom_layout_rules.get(&1).unwrap(),
+            &PathBuf::from("path/to/dir")
+        );
+        assert_eq!(
+            custom_layout_rules.get(&2).unwrap(),
+            &PathBuf::from("path/to/VALUE")
+        );
+
+        let config = r#"
+        {
+            "name": "Test",
+        }
+        "#;
+        let config = serde_json::from_str::<WorkspaceConfig>(config).unwrap();
+        assert_eq!(config.custom_layout_rules, None);
     }
 }

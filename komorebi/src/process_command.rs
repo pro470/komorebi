@@ -72,6 +72,7 @@ use crate::State;
 use crate::CUSTOM_FFM;
 use crate::DATA_DIR;
 use crate::DISPLAY_INDEX_PREFERENCES;
+use crate::FLOATING_APPLICATIONS;
 use crate::HIDING_BEHAVIOUR;
 use crate::IGNORE_IDENTIFIERS;
 use crate::INITIAL_CONFIGURATION_LOADED;
@@ -81,6 +82,7 @@ use crate::MONITOR_INDEX_PREFERENCES;
 use crate::NO_TITLEBAR;
 use crate::OBJECT_NAME_CHANGE_ON_LAUNCH;
 use crate::REMOVE_TITLEBARS;
+use crate::SESSION_FLOATING_APPLICATIONS;
 use crate::SUBSCRIPTION_PIPES;
 use crate::SUBSCRIPTION_SOCKETS;
 use crate::SUBSCRIPTION_SOCKET_OPTIONS;
@@ -224,6 +226,7 @@ impl WindowManager {
             _ => {}
         };
 
+        let mut force_update_borders = false;
         match message {
             SocketMessage::Promote => self.promote_container_to_front()?,
             SocketMessage::PromoteFocus => self.promote_focus_to_front()?,
@@ -406,7 +409,7 @@ impl WindowManager {
                 workspace.locked_containers.remove(&container_idx);
             }
             SocketMessage::ToggleLock => self.toggle_lock()?,
-            SocketMessage::ToggleFloat => self.toggle_float()?,
+            SocketMessage::ToggleFloat => self.toggle_float(false)?,
             SocketMessage::ToggleMonocle => self.toggle_monocle()?,
             SocketMessage::ToggleMaximize => self.toggle_maximize()?,
             SocketMessage::ToggleAlwaysOnTop => self.toggle_always_on_top()?,
@@ -553,6 +556,53 @@ impl WindowManager {
                         matching_strategy: Option::from(MatchingStrategy::Legacy),
                     }));
                 }
+            }
+            SocketMessage::SessionFloatRule => {
+                let foreground_window = WindowsApi::foreground_window()?;
+                let window = Window::from(foreground_window);
+                if let (Ok(exe), Ok(title), Ok(class)) =
+                    (window.exe(), window.title(), window.class())
+                {
+                    let rule = MatchingRule::Composite(vec![
+                        IdWithIdentifier {
+                            kind: ApplicationIdentifier::Exe,
+                            id: exe,
+                            matching_strategy: Option::from(MatchingStrategy::Equals),
+                        },
+                        IdWithIdentifier {
+                            kind: ApplicationIdentifier::Title,
+                            id: title,
+                            matching_strategy: Option::from(MatchingStrategy::Equals),
+                        },
+                        IdWithIdentifier {
+                            kind: ApplicationIdentifier::Class,
+                            id: class,
+                            matching_strategy: Option::from(MatchingStrategy::Equals),
+                        },
+                    ]);
+
+                    let mut floating_applications = FLOATING_APPLICATIONS.lock();
+                    floating_applications.push(rule.clone());
+                    let mut session_floating_applications = SESSION_FLOATING_APPLICATIONS.lock();
+                    session_floating_applications.push(rule.clone());
+
+                    self.toggle_float(true)?;
+                }
+            }
+            SocketMessage::SessionFloatRules => {
+                let session_floating_applications = SESSION_FLOATING_APPLICATIONS.lock();
+                let rules = match serde_json::to_string_pretty(&*session_floating_applications) {
+                    Ok(rules) => rules,
+                    Err(error) => error.to_string(),
+                };
+
+                reply.write_all(rules.as_bytes())?;
+            }
+            SocketMessage::ClearSessionFloatRules => {
+                let mut floating_applications = FLOATING_APPLICATIONS.lock();
+                let mut session_floating_applications = SESSION_FLOATING_APPLICATIONS.lock();
+                floating_applications.retain(|r| !session_floating_applications.contains(r));
+                session_floating_applications.clear()
             }
             SocketMessage::IgnoreRule(identifier, ref id) => {
                 let mut ignore_identifiers = IGNORE_IDENTIFIERS.lock();
@@ -887,10 +937,12 @@ impl WindowManager {
             }
             SocketMessage::Retile => {
                 border_manager::destroy_all_borders()?;
+                force_update_borders = true;
                 self.retile_all(false)?
             }
             SocketMessage::RetileWithResizeDimensions => {
                 border_manager::destroy_all_borders()?;
+                force_update_borders = true;
                 self.retile_all(true)?
             }
             SocketMessage::FlipLayout(layout_flip) => self.flip_layout(layout_flip)?,
@@ -1647,6 +1699,7 @@ impl WindowManager {
             }
             SocketMessage::ReloadConfiguration => {
                 Self::reload_configuration();
+                force_update_borders = true;
             }
             SocketMessage::ReplaceConfiguration(ref config) => {
                 // Check that this is a valid static config file first
@@ -1675,15 +1728,78 @@ impl WindowManager {
 
                     // Set self to the new wm instance
                     *self = wm;
+
+                    // check if there are any bars
+                    let mut system = sysinfo::System::new_all();
+                    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+                    let has_bar = system
+                        .processes_by_name("komorebi-bar.exe".as_ref())
+                        .next()
+                        .is_some();
+
+                    // stop bar(s)
+                    if has_bar {
+                        let script = r"
+Stop-Process -Name:komorebi-bar -ErrorAction SilentlyContinue
+                ";
+                        match powershell_script::run(script) {
+                            Ok(_) => {
+                                println!("{script}");
+
+                                // start new bar(s)
+                                let mut config = StaticConfig::read(config)?;
+                                if let Some(display_bar_configurations) =
+                                    &mut config.bar_configurations
+                                {
+                                    for config_file_path in &mut *display_bar_configurations {
+                                        let script = r#"Start-Process "komorebi-bar" '"--config" "CONFIGFILE"' -WindowStyle hidden"#
+                            .replace("CONFIGFILE", &config_file_path.to_string_lossy());
+
+                                        match powershell_script::run(&script) {
+                                            Ok(_) => {
+                                                println!("{script}");
+                                            }
+                                            Err(error) => {
+                                                println!("Error: {error}");
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let script = r"
+if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
+{
+  Start-Process komorebi-bar -WindowStyle hidden
+}
+                ";
+                                    match powershell_script::run(script) {
+                                        Ok(_) => {
+                                            println!("{script}");
+                                        }
+                                        Err(error) => {
+                                            println!("Error: {error}");
+                                        }
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                println!("Error: {error}");
+                            }
+                        }
+                    }
+
+                    force_update_borders = true;
                 }
             }
             SocketMessage::ReloadStaticConfiguration(ref pathbuf) => {
                 self.reload_static_configuration(pathbuf)?;
+                force_update_borders = true;
             }
             SocketMessage::CompleteConfiguration => {
                 if !INITIAL_CONFIGURATION_LOADED.load(Ordering::SeqCst) {
                     INITIAL_CONFIGURATION_LOADED.store(true, Ordering::SeqCst);
                     self.update_focused_workspace(false, false)?;
+                    force_update_borders = true;
                 }
             }
             SocketMessage::WatchConfiguration(enable) => {
@@ -1941,6 +2057,8 @@ impl WindowManager {
                             self.remove_all_accents()?;
                         }
                     }
+                } else if matches!(IMPLEMENTATION.load(), BorderImplementation::Komorebi) {
+                    force_update_borders = true;
                 }
             }
             SocketMessage::BorderImplementation(implementation) => {
@@ -1953,44 +2071,49 @@ impl WindowManager {
                     match IMPLEMENTATION.load() {
                         BorderImplementation::Komorebi => {
                             self.remove_all_accents()?;
+                            force_update_borders = true;
                         }
                         BorderImplementation::Windows => {
                             border_manager::destroy_all_borders()?;
                         }
                     }
-
-                    border_manager::send_notification(None);
                 }
             }
-            SocketMessage::BorderColour(kind, r, g, b) => match kind {
-                WindowKind::Single => {
-                    border_manager::FOCUSED.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+            SocketMessage::BorderColour(kind, r, g, b) => {
+                match kind {
+                    WindowKind::Single => {
+                        border_manager::FOCUSED.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+                    }
+                    WindowKind::Stack => {
+                        border_manager::STACK.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+                    }
+                    WindowKind::Monocle => {
+                        border_manager::MONOCLE.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+                    }
+                    WindowKind::Unfocused => {
+                        border_manager::UNFOCUSED.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+                    }
+                    WindowKind::UnfocusedLocked => {
+                        border_manager::UNFOCUSED_LOCKED
+                            .store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+                    }
+                    WindowKind::Floating => {
+                        border_manager::FLOATING.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
+                    }
                 }
-                WindowKind::Stack => {
-                    border_manager::STACK.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
-                }
-                WindowKind::Monocle => {
-                    border_manager::MONOCLE.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
-                }
-                WindowKind::Unfocused => {
-                    border_manager::UNFOCUSED.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
-                }
-                WindowKind::UnfocusedLocked => {
-                    border_manager::UNFOCUSED_LOCKED
-                        .store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
-                }
-                WindowKind::Floating => {
-                    border_manager::FLOATING.store(Rgb::new(r, g, b).into(), Ordering::SeqCst);
-                }
-            },
+                force_update_borders = true;
+            }
             SocketMessage::BorderStyle(style) => {
                 STYLE.store(style);
+                force_update_borders = true;
             }
             SocketMessage::BorderWidth(width) => {
                 border_manager::BORDER_WIDTH.store(width, Ordering::SeqCst);
+                force_update_borders = true;
             }
             SocketMessage::BorderOffset(offset) => {
                 border_manager::BORDER_OFFSET.store(offset, Ordering::SeqCst);
+                force_update_borders = true;
             }
             SocketMessage::Animation(enable, prefix) => match prefix {
                 Some(prefix) => {
@@ -2171,7 +2294,11 @@ impl WindowManager {
             initial_state.has_been_modified(self.as_ref()),
         )?;
 
-        border_manager::send_notification(None);
+        if force_update_borders {
+            border_manager::send_force_update();
+        } else {
+            border_manager::send_notification(None);
+        }
         transparency_manager::send_notification();
         stackbar_manager::send_notification();
 

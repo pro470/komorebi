@@ -8,8 +8,6 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
 
 use crate::border_manager;
-use crate::border_manager::BORDER_OFFSET;
-use crate::border_manager::BORDER_WIDTH;
 use crate::container::Container;
 use crate::core::Axis;
 use crate::core::CustomLayout;
@@ -94,12 +92,13 @@ pub struct Workspace {
     pub window_container_behaviour_rules: Option<Vec<(usize, WindowContainerBehaviour)>>,
     #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub float_override: Option<bool>,
+    #[serde(skip)]
     #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub globals: WorkspaceGlobals,
     #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub layer: WorkspaceLayer,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
-    pub floating_layer_behaviour: FloatingLayerBehaviour,
+    #[getset(get_copy = "pub", get_mut = "pub", set = "pub")]
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
     #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub locked_containers: BTreeSet<usize>,
     #[getset(get = "pub", get_mut = "pub", set = "pub")]
@@ -187,10 +186,13 @@ pub enum WorkspaceWindowLocation {
 pub struct WorkspaceGlobals {
     pub container_padding: Option<i32>,
     pub workspace_padding: Option<i32>,
+    pub border_width: i32,
+    pub border_offset: i32,
     pub work_area: Rect,
     pub work_area_offset: Option<Rect>,
     pub window_based_work_area_offset: Option<Rect>,
     pub window_based_work_area_offset_limit: isize,
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
 }
 
 impl Workspace {
@@ -263,7 +265,7 @@ impl Workspace {
 
         self.set_float_override(config.float_override);
         self.set_layout_flip(config.layout_flip);
-        self.set_floating_layer_behaviour(config.floating_layer_behaviour.unwrap_or_default());
+        self.set_floating_layer_behaviour(config.floating_layer_behaviour);
         self.set_wallpaper(config.wallpaper.clone());
 
         self.set_workspace_config(Some(config.clone()));
@@ -301,13 +303,12 @@ impl Workspace {
         }
     }
 
-    pub fn apply_wallpaper(&self) -> Result<()> {
-        if let Some(wallpaper) = &self.wallpaper {
-            if let Err(error) = WindowsApi::set_wallpaper(&wallpaper.path) {
+    pub fn apply_wallpaper(&self, hmonitor: isize, monitor_wp: &Option<Wallpaper>) -> Result<()> {
+        if let Some(wallpaper) = self.wallpaper.as_ref().or(monitor_wp.as_ref()) {
+            if let Err(error) = WindowsApi::set_wallpaper(&wallpaper.path, hmonitor) {
                 tracing::error!("failed to set wallpaper: {error}");
             }
 
-            // if !cfg!(debug_assertions) && wallpaper.generate_theme.unwrap_or(true) {
             if wallpaper.generate_theme.unwrap_or(true) {
                 let variant = wallpaper
                     .theme_options
@@ -418,12 +419,17 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn restore(&mut self, mouse_follows_focus: bool) -> Result<()> {
+    pub fn restore(
+        &mut self,
+        mouse_follows_focus: bool,
+        hmonitor: isize,
+        monitor_wp: &Option<Wallpaper>,
+    ) -> Result<()> {
         if let Some(container) = self.monocle_container() {
             if let Some(window) = container.focused_window() {
                 container.restore();
                 window.focus(mouse_follows_focus)?;
-                return self.apply_wallpaper();
+                return self.apply_wallpaper(hmonitor, monitor_wp);
             }
         }
 
@@ -467,13 +473,16 @@ impl Workspace {
             floating_window.focus(mouse_follows_focus)?;
         }
 
-        self.apply_wallpaper()
+        self.apply_wallpaper(hmonitor, monitor_wp)
     }
 
     pub fn update(&mut self) -> Result<()> {
         if !INITIAL_CONFIGURATION_LOADED.load(Ordering::SeqCst) {
             return Ok(());
         }
+
+        // make sure we are never holding on to empty containers
+        self.containers_mut().retain(|c| !c.windows().is_empty());
 
         let container_padding = self
             .container_padding()
@@ -483,6 +492,8 @@ impl Workspace {
             .workspace_padding()
             .or(self.globals().workspace_padding)
             .unwrap_or_default();
+        let border_width = self.globals().border_width;
+        let border_offset = self.globals().border_offset;
         let work_area = self.globals().work_area;
         let work_area_offset = self.globals().work_area_offset;
         let window_based_work_area_offset = self.globals().window_based_work_area_offset;
@@ -555,12 +566,8 @@ impl Workspace {
             if let Some(container) = self.monocle_container_mut() {
                 if let Some(window) = container.focused_window_mut() {
                     adjusted_work_area.add_padding(container_padding);
-                    {
-                        let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
-                        adjusted_work_area.add_padding(border_offset);
-                        let width = BORDER_WIDTH.load(Ordering::SeqCst);
-                        adjusted_work_area.add_padding(width);
-                    }
+                    adjusted_work_area.add_padding(border_offset);
+                    adjusted_work_area.add_padding(border_width);
                     window.set_position(&adjusted_work_area, true)?;
                 };
             } else if let Some(window) = self.maximized_window_mut() {
@@ -588,13 +595,8 @@ impl Workspace {
                     let window_count = container.windows().len();
 
                     if let Some(layout) = layouts.get_mut(i) {
-                        {
-                            let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
-                            layout.add_padding(border_offset);
-
-                            let width = BORDER_WIDTH.load(Ordering::SeqCst);
-                            layout.add_padding(width);
-                        }
+                        layout.add_padding(border_offset);
+                        layout.add_padding(border_width);
 
                         if stackbar_manager::should_have_stackbar(window_count) {
                             let tab_height = STACKBAR_TAB_HEIGHT.load(Ordering::SeqCst);
@@ -1774,7 +1776,6 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::container::Container;
     use crate::Window;
     use std::collections::BTreeSet;
@@ -2486,5 +2487,54 @@ mod tests {
         // Should contain hwnd 0 since this is the first window in the container
         let floating_windows = workspace.floating_windows_mut();
         assert!(floating_windows.contains(&Window { hwnd: 0 }));
+    }
+
+    #[test]
+    fn test_visible_windows() {
+        let mut workspace = Workspace::default();
+
+        {
+            // Create and add a default Container with 2 windows
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(100));
+            container.windows_mut().push_back(Window::from(200));
+            workspace.add_container_to_back(container);
+        }
+
+        {
+            // visible_windows should return None and 100
+            let visible_windows = workspace.visible_windows();
+            assert_eq!(visible_windows.len(), 2);
+            assert!(visible_windows[0].is_none());
+            assert_eq!(visible_windows[1].unwrap().hwnd, 100);
+        }
+
+        {
+            // Create and add a default Container with 1 window
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(300));
+            workspace.add_container_to_back(container);
+        }
+
+        {
+            // visible_windows should return None, 100, and 300
+            let visible_windows = workspace.visible_windows();
+            assert_eq!(visible_windows.len(), 3);
+            assert!(visible_windows[0].is_none());
+            assert_eq!(visible_windows[1].unwrap().hwnd, 100);
+            assert_eq!(visible_windows[2].unwrap().hwnd, 300);
+        }
+
+        // Maximize window 200
+        workspace.set_maximized_window(Some(Window { hwnd: 200 }));
+
+        {
+            // visible_windows should return 200, 100, and 300
+            let visible_windows = workspace.visible_windows();
+            assert_eq!(visible_windows.len(), 3);
+            assert_eq!(visible_windows[0].unwrap().hwnd, 200);
+            assert_eq!(visible_windows[1].unwrap().hwnd, 100);
+            assert_eq!(visible_windows[2].unwrap().hwnd, 300);
+        }
     }
 }

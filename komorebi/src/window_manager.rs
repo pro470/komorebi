@@ -360,6 +360,8 @@ impl From<&WindowManager> for State {
                 workspace_names: monitor.workspace_names.clone(),
                 container_padding: monitor.container_padding,
                 workspace_padding: monitor.workspace_padding,
+                wallpaper: monitor.wallpaper.clone(),
+                floating_layer_behaviour: monitor.floating_layer_behaviour,
             })
             .collect::<VecDeque<_>>();
         stripped_monitors.focus(wm.monitors.focused_idx());
@@ -652,14 +654,18 @@ impl WindowManager {
                     self.window_management_behaviour.float_override
                 };
 
+                let floating_layer_behaviour =
+                    if let Some(behaviour) = workspace.floating_layer_behaviour() {
+                        behaviour
+                    } else {
+                        monitor.floating_layer_behaviour().unwrap_or_default()
+                    };
+
                 // If the workspace layer is `Floating` and the floating layer behaviour is `Float`,
                 // then consider it as if it had float override so that new windows spawn as floating
                 float_override = float_override
                     || (matches!(workspace.layer, WorkspaceLayer::Floating)
-                        && matches!(
-                            workspace.floating_layer_behaviour,
-                            FloatingLayerBehaviour::Float
-                        ));
+                        && matches!(floating_layer_behaviour, FloatingLayerBehaviour::Float));
 
                 return WindowManagementBehaviour {
                     current_behaviour,
@@ -1016,6 +1022,8 @@ impl WindowManager {
             let focused_workspace_idx = monitor.focused_workspace_idx();
             monitor.update_workspace_globals(focused_workspace_idx, offset);
 
+            let hmonitor = monitor.id();
+            let monitor_wp = monitor.wallpaper.clone();
             let workspace = monitor
                 .focused_workspace_mut()
                 .ok_or_else(|| anyhow!("there is no workspace"))?;
@@ -1024,6 +1032,12 @@ impl WindowManager {
             if !preserve_resize_dimensions {
                 for resize in workspace.resize_dimensions_mut() {
                     *resize = None;
+                }
+            }
+
+            if workspace.wallpaper().is_some() || monitor_wp.is_some() {
+                if let Err(error) = workspace.apply_wallpaper(hmonitor, &monitor_wp) {
+                    tracing::error!("failed to apply wallpaper: {}", error);
                 }
             }
 
@@ -1708,6 +1722,30 @@ impl WindowManager {
         }
 
         Ok(())
+    }
+
+    /// Check for an existing wallpaper definition on the workspace/monitor index pair and apply it
+    /// if it exists
+    #[tracing::instrument(skip(self))]
+    pub fn apply_wallpaper_for_monitor_workspace(
+        &mut self,
+        monitor_idx: usize,
+        workspace_idx: usize,
+    ) -> Result<()> {
+        let monitor = self
+            .monitors_mut()
+            .get_mut(monitor_idx)
+            .ok_or_else(|| anyhow!("there is no monitor"))?;
+
+        let hmonitor = monitor.id();
+        let monitor_wp = monitor.wallpaper.clone();
+
+        let workspace = monitor
+            .workspaces()
+            .get(workspace_idx)
+            .ok_or_else(|| anyhow!("there is no workspace"))?;
+
+        workspace.apply_wallpaper(hmonitor, &monitor_wp)
     }
 
     pub fn update_focused_workspace_by_monitor_idx(&mut self, idx: usize) -> Result<()> {
@@ -3359,7 +3397,7 @@ impl WindowManager {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn toggle_float(&mut self) -> Result<()> {
+    pub fn toggle_float(&mut self, force_float: bool) -> Result<()> {
         let hwnd = WindowsApi::foreground_window()?;
         let workspace = self.focused_workspace_mut()?;
 
@@ -3371,7 +3409,7 @@ impl WindowManager {
             }
         }
 
-        if is_floating_window {
+        if is_floating_window && !force_float {
             workspace.set_layer(WorkspaceLayer::Tiling);
             self.unfloat_window()?;
         } else {
@@ -5280,6 +5318,136 @@ mod tests {
             wm.toggle_tiling().unwrap();
             let workspace = wm.focused_workspace_mut().unwrap();
             assert!(*workspace.tile());
+        }
+    }
+
+    #[test]
+    fn test_toggle_lock() {
+        let (mut wm, _context) = setup_window_manager();
+
+        {
+            // Add monitor with default workspace to
+            let mut m = monitor::new(
+                0,
+                Rect::default(),
+                Rect::default(),
+                "TestMonitor".to_string(),
+                "TestDevice".to_string(),
+                "TestDeviceID".to_string(),
+                Some("TestMonitorID".to_string()),
+            );
+
+            let workspace = m.focused_workspace_mut().unwrap();
+
+            // Create containers to add to the workspace
+            for _ in 0..3 {
+                let container = Container::default();
+                workspace.add_container_to_back(container);
+            }
+
+            wm.monitors_mut().push_back(m);
+        }
+
+        {
+            // Ensure container 2 is not locked
+            let workspace = wm.focused_workspace_mut().unwrap();
+            assert!(!workspace.locked_containers().contains(&2));
+        }
+
+        // Toggle lock on focused container
+        wm.toggle_lock().unwrap();
+
+        {
+            // Ensure container 2 is locked
+            let workspace = wm.focused_workspace_mut().unwrap();
+            assert!(workspace.locked_containers().contains(&2));
+        }
+
+        // Toggle lock on focused container
+        wm.toggle_lock().unwrap();
+
+        {
+            // Ensure container 2 is not locked
+            let workspace = wm.focused_workspace_mut().unwrap();
+            assert!(!workspace.locked_containers().contains(&2));
+        }
+    }
+
+    #[test]
+    fn test_float_window() {
+        let (mut wm, _context) = setup_window_manager();
+
+        {
+            // Create a monitor
+            let mut m = monitor::new(
+                0,
+                Rect::default(),
+                Rect::default(),
+                "TestMonitor".to_string(),
+                "TestDevice".to_string(),
+                "TestDeviceID".to_string(),
+                Some("TestMonitorID".to_string()),
+            );
+
+            // Create a container
+            let mut container = Container::default();
+
+            // Add three windows to the container
+            for i in 0..3 {
+                container.windows_mut().push_back(Window::from(i));
+            }
+
+            // Should have 3 windows in the container
+            assert_eq!(container.windows().len(), 3);
+
+            // Add the container to the workspace
+            let workspace = m.focused_workspace_mut().unwrap();
+            workspace.add_container_to_back(container);
+
+            // Add monitor to the window manager
+            wm.monitors_mut().push_back(m);
+        }
+
+        // Add focused window to floating window list
+        wm.float_window().ok();
+
+        {
+            let workspace = wm.focused_workspace().unwrap();
+            let floating_windows = workspace.floating_windows();
+            let container = workspace.focused_container().unwrap();
+
+            // Hwnd 0 should be added to floating_windows
+            assert_eq!(floating_windows[0].hwnd, 0);
+
+            // Should have a length of 1
+            assert_eq!(floating_windows.len(), 1);
+
+            // Should have 2 windows in the container
+            assert_eq!(container.windows().len(), 2);
+
+            // Should be focused on window 1
+            assert_eq!(container.focused_window(), Some(&Window { hwnd: 1 }));
+        }
+
+        // Add focused window to floating window list
+        wm.float_window().ok();
+
+        {
+            let workspace = wm.focused_workspace().unwrap();
+            let floating_windows = workspace.floating_windows();
+            let container = workspace.focused_container().unwrap();
+
+            // Hwnd 1 should be added to floating_windows
+            assert_eq!(floating_windows[1].hwnd, 1);
+
+            // Should have a length of 2
+            assert_eq!(floating_windows.len(), 2);
+
+            // Should have 1 window in the container
+            assert_eq!(container.windows().len(), 1);
+
+            // Should be focused on window 2
+            assert_eq!(container.focused_window(), Some(&Window { hwnd: 2 }));
         }
     }
 }
