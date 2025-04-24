@@ -12,9 +12,9 @@ members = [
 ]
 
 [workspace.dependencies]
-bevy_asset = "0.15.3"
-bevy_ecs = "0.15.3"
-bevy_reflect = "0.15.3"
+bevy_asset = "0.16.0"
+bevy_ecs = "0.16.0"
+bevy_reflect = "0.16.0"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 chrono-tz = "0.10"
 chrono = "0.4"
