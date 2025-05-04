@@ -63,6 +63,7 @@ use crate::core::config_generation::MatchingRule;
 use crate::core::config_generation::MatchingStrategy;
 use crate::core::config_generation::WorkspaceMatchingRule;
 use color_eyre::Result;
+use crossbeam_utils::atomic::AtomicCell;
 use os_info::Version;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -227,6 +228,8 @@ lazy_static! {
         Arc::new(Mutex::new(HashMap::new()));
 
     static ref FLOATING_WINDOW_TOGGLE_ASPECT_RATIO: Arc<Mutex<AspectRatio>> = Arc::new(Mutex::new(AspectRatio::Predefined(PredefinedAspectRatio::Widescreen)));
+
+    static ref CURRENT_VIRTUAL_DESKTOP: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
 }
 
 pub static DEFAULT_WORKSPACE_PADDING: AtomicI32 = AtomicI32::new(10);
@@ -239,6 +242,9 @@ pub static SESSION_ID: AtomicU32 = AtomicU32::new(0);
 pub static REMOVE_TITLEBARS: AtomicBool = AtomicBool::new(false);
 
 pub static SLOW_APPLICATION_COMPENSATION_TIME: AtomicU64 = AtomicU64::new(20);
+
+pub static WINDOW_HANDLING_BEHAVIOUR: AtomicCell<WindowHandlingBehaviour> =
+    AtomicCell::new(WindowHandlingBehaviour::Sync);
 
 shadow_rs::shadow!(build);
 
@@ -293,6 +299,14 @@ pub enum NotificationEvent {
     WindowManager(WindowManagerEvent),
     Socket(SocketMessage),
     Monitor(MonitorNotification),
+    VirtualDesktop(VirtualDesktopNotification),
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub enum VirtualDesktopNotification {
+    EnteredAssociatedVirtualDesktop,
+    LeftAssociatedVirtualDesktop,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

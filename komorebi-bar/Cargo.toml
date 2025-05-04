@@ -22,7 +22,7 @@ font-loader = "0.11"
 hotwatch = { workspace = true }
 image = "0.25"
 lazy_static = { workspace = true }
-netdev = "0.33"
+netdev = "0.34"
 num = "0.4"
 num-derive = "0.4"
 num-traits = "0.2"
@@ -35,6 +35,7 @@ starship-battery = "0.10"
 sysinfo = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+which = { workspace = true }
 windows = { workspace = true }
 windows-core = { workspace = true }
 windows-icons = { git = "https://github.com/LGUG2Z/windows-icons", rev = "0c9d7ee1b807347c507d3a9862dd007b4d3f4354" }

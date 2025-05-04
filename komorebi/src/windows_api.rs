@@ -106,6 +106,7 @@ use windows::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes;
 use windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW;
 use windows::Win32::UI::WindowsAndMessaging::SetWindowPos;
 use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+use windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync;
 use windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW;
 use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
 use windows::Win32::UI::WindowsAndMessaging::CW_USEDEFAULT;
@@ -125,6 +126,7 @@ use windows::Win32::UI::WindowsAndMessaging::SPI_GETACTIVEWINDOWTRACKING;
 use windows::Win32::UI::WindowsAndMessaging::SPI_GETFOREGROUNDLOCKTIMEOUT;
 use windows::Win32::UI::WindowsAndMessaging::SPI_SETACTIVEWINDOWTRACKING;
 use windows::Win32::UI::WindowsAndMessaging::SPI_SETFOREGROUNDLOCKTIMEOUT;
+use windows::Win32::UI::WindowsAndMessaging::SWP_ASYNCWINDOWPOS;
 use windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE;
 use windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE;
 use windows::Win32::UI::WindowsAndMessaging::SWP_SHOWWINDOW;
@@ -157,10 +159,12 @@ use crate::ring::Ring;
 use crate::set_window_position::SetWindowPosition;
 use crate::windows_callbacks;
 use crate::Window;
+use crate::WindowHandlingBehaviour;
 use crate::WindowManager;
 use crate::DISPLAY_INDEX_PREFERENCES;
 use crate::DUPLICATE_MONITOR_SERIAL_IDS;
 use crate::MONITOR_INDEX_PREFERENCES;
+use crate::WINDOW_HANDLING_BEHAVIOUR;
 
 macro_rules! as_ptr {
     ($value:expr) => {
@@ -473,7 +477,12 @@ impl WindowsApi {
     /// position window resizes the target window to the given layout, adjusting
     /// the layout to account for any window shadow borders (the window painted
     /// region will match layout on completion).
-    pub fn position_window(hwnd: isize, layout: &Rect, top: bool) -> Result<()> {
+    pub fn position_window(
+        hwnd: isize,
+        layout: &Rect,
+        top: bool,
+        with_async_window_pos: bool,
+    ) -> Result<()> {
         let hwnd = HWND(as_ptr!(hwnd));
 
         let mut flags = SetWindowPosition::NO_ACTIVATE
@@ -484,6 +493,19 @@ impl WindowsApi {
         // If the request is to place the window on top, then HWND_TOP will take
         // effect, otherwise pass NO_Z_ORDER that will cause set_window_pos to
         // ignore the z-order paramter.
+
+        // By default SetWindowPos waits for target window's WindowProc thread
+        // to process the message, so we have to use ASYNC_WINDOW_POS to avoid
+        // blocking our thread in case the target window is not responding.
+        if with_async_window_pos
+            && matches!(
+                WINDOW_HANDLING_BEHAVIOUR.load(),
+                WindowHandlingBehaviour::Async
+            )
+        {
+            flags |= SetWindowPosition::ASYNC_WINDOW_POS;
+        }
+
         if !top {
             flags |= SetWindowPosition::NO_Z_ORDER;
         }
@@ -518,10 +540,17 @@ impl WindowsApi {
     /// Raise the window to the top of the Z order, but do not activate or focus
     /// it. Use raise_and_focus_window to activate and focus a window.
     pub fn raise_window(hwnd: isize) -> Result<()> {
-        let flags = SetWindowPosition::NO_MOVE
+        let mut flags = SetWindowPosition::NO_MOVE
             | SetWindowPosition::NO_SIZE
             | SetWindowPosition::NO_ACTIVATE
             | SetWindowPosition::SHOW_WINDOW;
+
+        if matches!(
+            WINDOW_HANDLING_BEHAVIOUR.load(),
+            WindowHandlingBehaviour::Async
+        ) {
+            flags |= SetWindowPosition::ASYNC_WINDOW_POS;
+        }
 
         let position = HWND_TOP;
         Self::set_window_pos(
@@ -535,10 +564,17 @@ impl WindowsApi {
     /// Lower the window to the bottom of the Z order, but do not activate or focus
     /// it.
     pub fn lower_window(hwnd: isize) -> Result<()> {
-        let flags = SetWindowPosition::NO_MOVE
+        let mut flags = SetWindowPosition::NO_MOVE
             | SetWindowPosition::NO_SIZE
             | SetWindowPosition::NO_ACTIVATE
             | SetWindowPosition::SHOW_WINDOW;
+
+        if matches!(
+            WINDOW_HANDLING_BEHAVIOUR.load(),
+            WindowHandlingBehaviour::Async
+        ) {
+            flags |= SetWindowPosition::ASYNC_WINDOW_POS;
+        }
 
         let position = HWND_BOTTOM;
         Self::set_window_pos(
@@ -550,12 +586,17 @@ impl WindowsApi {
     }
 
     pub fn set_border_pos(hwnd: isize, layout: &Rect, position: isize) -> Result<()> {
-        let flags = {
-            SetWindowPosition::NO_SEND_CHANGING
-                | SetWindowPosition::NO_ACTIVATE
-                | SetWindowPosition::NO_REDRAW
-                | SetWindowPosition::SHOW_WINDOW
-        };
+        let mut flags = SetWindowPosition::NO_SEND_CHANGING
+            | SetWindowPosition::NO_ACTIVATE
+            | SetWindowPosition::NO_REDRAW
+            | SetWindowPosition::SHOW_WINDOW;
+
+        if matches!(
+            WINDOW_HANDLING_BEHAVIOUR.load(),
+            WindowHandlingBehaviour::Async
+        ) {
+            flags |= SetWindowPosition::ASYNC_WINDOW_POS;
+        }
 
         Self::set_window_pos(
             HWND(as_ptr!(hwnd)),
@@ -581,6 +622,7 @@ impl WindowsApi {
         .process()
     }
 
+    /// move_windows calls MoveWindow, but cannot be called with async window pos, so it might hang
     pub fn move_window(hwnd: isize, layout: &Rect, repaint: bool) -> Result<()> {
         let hwnd = HWND(as_ptr!(hwnd));
 
@@ -598,9 +640,18 @@ impl WindowsApi {
         // BOOL is returned but does not signify whether or not the operation was succesful
         // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
         // TODO: error handling
-        unsafe {
-            let _ = ShowWindow(HWND(as_ptr!(hwnd)), command);
-        };
+        if matches!(
+            WINDOW_HANDLING_BEHAVIOUR.load(),
+            WindowHandlingBehaviour::Async
+        ) {
+            unsafe {
+                let _ = ShowWindowAsync(HWND(as_ptr!(hwnd)), command);
+            };
+        } else {
+            unsafe {
+                let _ = ShowWindow(HWND(as_ptr!(hwnd)), command);
+            };
+        }
     }
 
     pub fn minimize_window(hwnd: isize) {
@@ -656,7 +707,7 @@ impl WindowsApi {
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS,
             )
             .process();
             SetForegroundWindow(HWND(as_ptr!(hwnd)))
