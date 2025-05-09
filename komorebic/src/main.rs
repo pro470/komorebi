@@ -1020,6 +1020,8 @@ enum SubCommand {
     GlobalState,
     /// Launch the komorebi-gui debugging tool
     Gui,
+    /// Toggle the komorebi-shortcuts helper
+    ToggleShortcuts,
     /// Show a JSON representation of visible windows
     VisibleWindows,
     /// Show information about connected monitors
@@ -2749,6 +2751,15 @@ if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
         }
         SubCommand::Gui => {
             Command::new("komorebi-gui").spawn()?;
+        }
+        SubCommand::ToggleShortcuts => {
+            let output = Command::new("taskkill")
+                .args(["/F", "/IM", "komorebi-shortcuts.exe"])
+                .output()?;
+
+            if !output.status.success() {
+                Command::new("komorebi-shortcuts.exe").spawn()?;
+            }
         }
         SubCommand::VisibleWindows => {
             print_query(&SocketMessage::VisibleWindows);
