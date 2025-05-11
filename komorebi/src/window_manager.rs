@@ -4770,6 +4770,64 @@ mod tests {
     }
 
     #[test]
+    fn test_transfer_window_to_nonexistent_monitor() {
+        // NOTE: transfer_window is primarily used when a window is being dragged by a mouse. The
+        // transfer_window function does return an error when the target monitor doesn't exist but
+        // there is a bug where the window isn't in the container after the window fails to
+        // transfer. The test will test for the result of the transfer_window function but not if
+        // the window is in the container after the transfer fails.
+
+        let (mut wm, _context) = setup_window_manager();
+
+        {
+            // Create a first monitor
+            let mut m = monitor::new(
+                0,
+                Rect::default(),
+                Rect::default(),
+                "TestMonitor".to_string(),
+                "TestDevice".to_string(),
+                "TestDeviceID".to_string(),
+                Some("TestMonitorID".to_string()),
+            );
+
+            // Create a container
+            let workspace = m.focused_workspace_mut().unwrap();
+            let mut container = Container::default();
+
+            // Add a window to the container
+            container.windows_mut().push_back(Window::from(0));
+            workspace.add_container_to_back(container);
+
+            // Should contain 1 container
+            assert_eq!(workspace.containers().len(), 1);
+
+            wm.monitors_mut().push_back(m);
+        }
+
+        {
+            // Monitor 0, Workspace 0, Window 0
+            let origin = (0, 0, 0);
+
+            // Monitor 1, Workspace 0, Window 0
+            //
+            let target = (1, 0, 0);
+
+            // Attempt to transfer the window from monitor 0 to a non-existent monitor
+            let result = wm.transfer_window(origin, target);
+
+            // Result should be an error since the monitor doesn't exist
+            assert!(
+                result.is_err(),
+                "Expected an error when transferring to a non-existent monitor"
+            );
+
+            assert_eq!(wm.focused_container_idx().unwrap(), 0);
+            assert_eq!(wm.focused_workspace_idx().unwrap(), 0);
+        }
+    }
+
+    #[test]
     fn test_transfer_container() {
         let (mut wm, _context) = setup_window_manager();
 
@@ -5266,7 +5324,7 @@ mod tests {
             // Should have 2 workspaces
             assert_eq!(m.workspaces().len(), 2);
 
-            // Add monitor to workspace
+            // Add monitor to window manager
             wm.monitors_mut().push_back(m);
         }
 
@@ -5311,6 +5369,42 @@ mod tests {
             let monitor = wm.focused_monitor_mut().unwrap();
             assert_eq!(monitor.workspaces().len(), 1);
         }
+    }
+
+    #[test]
+    fn test_move_workspace_to_nonexistent_monitor() {
+        let (mut wm, _context) = setup_window_manager();
+
+        {
+            let mut m = monitor::new(
+                0,
+                Rect::default(),
+                Rect::default(),
+                "TestMonitor".to_string(),
+                "TestDevice".to_string(),
+                "TestDeviceID".to_string(),
+                Some("TestMonitorID".to_string()),
+            );
+
+            // Add another workspace
+            let new_workspace_index = m.new_workspace_idx();
+            m.focus_workspace(new_workspace_index).unwrap();
+
+            // Should have 2 workspaces
+            assert_eq!(m.workspaces().len(), 2);
+
+            // Add monitor to window manager
+            wm.monitors_mut().push_back(m);
+        }
+
+        // Attempt to move a workspace to a non-existent monitor
+        let result = wm.move_workspace_to_monitor(1);
+
+        // Should be an error since Monitor 1 does not exist
+        assert!(
+            result.is_err(),
+            "Expected an error when moving to a non-existent monitor"
+        );
     }
 
     #[test]
