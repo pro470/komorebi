@@ -851,9 +851,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.22"
+version = "1.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32db95edf998450acc7881c932f94cd9b05c87b4b2599e8bab064753da4acfd1"
+checksum = "5f4ac86a9e5bc1e2b3449ab9d7d3a6a405e3d1bb28d7b9be8614f55846ae3766"
 dependencies = [
  "jobserver",
  "libc",
@@ -2914,7 +2914,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "komorebi"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "bitflags 2.9.1",
  "clap",
@@ -2923,7 +2923,6 @@ dependencies = [
  "crossbeam-utils",
  "ctrlc",
  "dirs 6.0.0",
- "dunce",
  "getset",
  "hotwatch",
  "komorebi-themes",
@@ -2963,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "komorebi-bar"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3003,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "komorebi-client"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "komorebi",
  "serde_json_lenient",
@@ -3012,7 +3011,7 @@ dependencies = [
 
 [[package]]
 name = "komorebi-gui"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "eframe",
  "egui_extras",
@@ -3035,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "komorebi-themes"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "base16-egui-themes",
  "catppuccin-egui",
@@ -3050,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "komorebic"
-version = "0.1.37"
+version = "0.1.38"
 dependencies = [
  "chrono",
  "clap",
@@ -3076,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "komorebic-no-console"
-version = "0.1.37"
+version = "0.1.38"
 
 [[package]]
 name = "kqueue"
@@ -6787,12 +6786,12 @@ dependencies = [
 [[package]]
 name = "whkd-core"
 version = "0.2.9"
-source = "git+https://github.com/LGUG2Z/whkd?rev=29df24ff2dd715655b0366bd2a598837c699a8e9#29df24ff2dd715655b0366bd2a598837c699a8e9"
+source = "git+https://github.com/LGUG2Z/whkd?rev=v0.2.9#bf68f3df5f6383420e4e1d3b91acbcb46ce35c40"
 
 [[package]]
 name = "whkd-parser"
 version = "0.2.9"
-source = "git+https://github.com/LGUG2Z/whkd?rev=29df24ff2dd715655b0366bd2a598837c699a8e9#29df24ff2dd715655b0366bd2a598837c699a8e9"
+source = "git+https://github.com/LGUG2Z/whkd?rev=v0.2.9#bf68f3df5f6383420e4e1d3b91acbcb46ce35c40"
 dependencies = [
  "chumsky",
  "thiserror 2.0.12",

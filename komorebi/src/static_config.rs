@@ -35,6 +35,7 @@ use crate::core::StackbarMode;
 use crate::core::WindowContainerBehaviour;
 use crate::core::WindowManagementBehaviour;
 use crate::current_virtual_desktop;
+use crate::default_layout::LayoutOptions;
 use crate::monitor;
 use crate::monitor::Monitor;
 use crate::monitor_reconciliator;
@@ -191,6 +192,9 @@ pub struct WorkspaceConfig {
     /// Layout (default: BSP)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<DefaultLayout>,
+    /// Layout-specific options (default: None)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_options: Option<LayoutOptions>,
     /// END OF LIFE FEATURE: Custom Layout (default: None)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde_as(as = "Option<ResolvedPathBuf>")]
@@ -286,6 +290,7 @@ impl From<&Workspace> for WorkspaceConfig {
                     Layout::Custom(_) => None,
                 })
                 .flatten(),
+            layout_options: value.layout_options(),
             custom_layout: value
                 .workspace_config()
                 .as_ref()
@@ -397,7 +402,7 @@ pub enum AppSpecificConfigurationPath {
 #[serde_with::serde_as]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-/// The `komorebi.json` static configuration file reference for `v0.1.37`
+/// The `komorebi.json` static configuration file reference for `v0.1.38`
 pub struct StaticConfig {
     /// DEPRECATED from v0.1.22: no longer required
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1332,7 +1337,7 @@ impl StaticConfig {
     }
 
     pub fn postload(path: &PathBuf, wm: &Arc<Mutex<WindowManager>>) -> Result<()> {
-        let value = Self::read(path)?;
+        let mut value = Self::read(path)?;
         let mut wm = wm.lock();
 
         let configs_with_preference: Vec<_> =
@@ -1342,6 +1347,8 @@ impl StaticConfig {
         let mut workspace_matching_rules = WORKSPACE_MATCHING_RULES.lock();
         workspace_matching_rules.clear();
         drop(workspace_matching_rules);
+
+        let monitor_count = wm.monitors().len();
 
         let offset = wm.work_area_offset;
         for (i, monitor) in wm.monitors_mut().iter_mut().enumerate() {
@@ -1372,8 +1379,8 @@ impl StaticConfig {
             });
             if let Some(monitor_config) = value
                 .monitors
-                .as_ref()
-                .and_then(|ms| idx.and_then(|i| ms.get(i)))
+                .as_mut()
+                .and_then(|ms| idx.and_then(|i| ms.get_mut(i)))
             {
                 if let Some(used_config_idx) = idx {
                     configs_used.push(used_config_idx);
@@ -1396,7 +1403,14 @@ impl StaticConfig {
 
                 monitor.update_workspaces_globals(offset);
                 for (j, ws) in monitor.workspaces_mut().iter_mut().enumerate() {
-                    if let Some(workspace_config) = monitor_config.workspaces.get(j) {
+                    if let Some(workspace_config) = monitor_config.workspaces.get_mut(j) {
+                        if monitor_count > 1
+                            && matches!(workspace_config.layout, Some(DefaultLayout::Scrolling))
+                        {
+                            tracing::warn!("scrolling layout is only supported for a single monitor; falling back to columns layout");
+                            workspace_config.layout = Some(DefaultLayout::Columns);
+                        }
+
                         ws.load_static_config(workspace_config)?;
                     }
                 }
@@ -1913,11 +1927,13 @@ mod tests {
     use crate::WorkspaceConfig;
 
     #[test]
+    #[ignore = "this fails on github actions due to rate limiting changes introduced in may 2025"]
     fn backwards_compat() {
         let root = vec!["0.1.17", "0.1.18", "0.1.19"];
         let docs = vec![
             "0.1.20", "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25", "0.1.26", "0.1.27",
-            "0.1.28", "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34",
+            "0.1.28", "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34", "0.1.35",
+            "0.1.36",
         ];
 
         let mut versions = vec![];
