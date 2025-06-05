@@ -3258,6 +3258,8 @@ impl WindowManager {
 
     #[tracing::instrument(skip(self))]
     pub fn stack_all(&mut self) -> Result<()> {
+        self.unstack_all(false)?;
+
         self.handle_unmanaged_window_behaviour()?;
         tracing::info!("stacking all windows on workspace");
 
@@ -3284,7 +3286,7 @@ impl WindowManager {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn unstack_all(&mut self) -> Result<()> {
+    pub fn unstack_all(&mut self, update_workspace: bool) -> Result<()> {
         self.handle_unmanaged_window_behaviour()?;
         tracing::info!("unstacking all windows in container");
 
@@ -3314,7 +3316,11 @@ impl WindowManager {
             workspace.focus_container_by_window(hwnd)?;
         }
 
-        self.update_focused_workspace(self.mouse_follows_focus, true)
+        if update_workspace {
+            self.update_focused_workspace(self.mouse_follows_focus, true)?;
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self))]
