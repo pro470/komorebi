@@ -404,7 +404,9 @@ impl WindowManager {
                     .get_mut(workspace_idx)
                     .ok_or_eyre("no workspace at the given index")?;
 
-                workspace.locked_containers.insert(container_idx);
+                if let Some(container) = workspace.containers_mut().get_mut(container_idx) {
+                    container.set_locked(true);
+                }
             }
             SocketMessage::UnlockMonitorWorkspaceContainer(
                 monitor_idx,
@@ -421,7 +423,9 @@ impl WindowManager {
                     .get_mut(workspace_idx)
                     .ok_or_eyre("no workspace at the given index")?;
 
-                workspace.locked_containers.remove(&container_idx);
+                if let Some(container) = workspace.containers_mut().get_mut(container_idx) {
+                    container.set_locked(false);
+                }
             }
             SocketMessage::ToggleLock => self.toggle_lock()?,
             SocketMessage::ToggleFloat => self.toggle_float(false)?,
