@@ -21,7 +21,7 @@ jobs:
   cargo-deny:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -43,7 +43,7 @@ jobs:
       RUSTFLAGS: -Ctarget-feature=+crt-static -Dwarnings
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - run: rustup toolchain install stable --profile minimal
@@ -81,12 +81,12 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - shell: bash
         run: echo "VERSION=nightly" >> $GITHUB_ENV
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
       - run: |
           Compress-Archive -Force ./komorebi-x86_64-pc-windows-msvc-${{ github.sha }}/x86_64-pc-windows-msvc/release/*.exe komorebi-$Env:VERSION-x86_64-pc-windows-msvc.zip
           Copy-Item ./komorebi-x86_64-pc-windows-msvc-${{ github.sha }}/wix/*x86_64.msi -Destination ./komorebi-$Env:VERSION-x86_64.msi
@@ -128,14 +128,14 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - shell: bash
         run: |
           TAG=${{ github.event.release.tag_name }}
           echo "VERSION=${TAG#v}" >> $GITHUB_ENV
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
       - run: |
           Compress-Archive -Force ./komorebi-x86_64-pc-windows-msvc-${{ github.sha }}/x86_64-pc-windows-msvc/release/*.exe komorebi-$Env:VERSION-x86_64-pc-windows-msvc.zip
           Copy-Item ./komorebi-x86_64-pc-windows-msvc-${{ github.sha }}/wix/*x86_64.msi -Destination ./komorebi-$Env:VERSION-x86_64.msi
@@ -170,14 +170,14 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - shell: bash
         run: |
           TAG=${{ github.ref_name }}
           echo "VERSION=${TAG#v}" >> $GITHUB_ENV
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
       - run: |
           Compress-Archive -Force ./komorebi-x86_64-pc-windows-msvc-${{ github.sha }}/x86_64-pc-windows-msvc/release/*.exe komorebi-$Env:VERSION-x86_64-pc-windows-msvc.zip
           Copy-Item ./komorebi-x86_64-pc-windows-msvc-${{ github.sha }}/wix/*x86_64.msi -Destination ./komorebi-$Env:VERSION-x86_64.msi
