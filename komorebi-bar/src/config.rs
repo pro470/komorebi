@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-/// The `komorebi.bar.json` configuration file reference for `v0.1.38`
+/// The `komorebi.bar.json` configuration file reference for `v0.1.39`
 pub struct KomobarConfig {
     /// Bar height (default: 50)
     pub height: Option<f32>,
@@ -453,7 +453,7 @@ impl MouseMessage {
 
                 tracing::debug!("Sending messages: {messages:?}");
 
-                if komorebi_client::send_batch(messages.into_iter()).is_err() {
+                if komorebi_client::send_batch(messages).is_err() {
                     tracing::error!("could not send commands");
                 }
             }

@@ -1,5 +1,5 @@
-use color_eyre::eyre::anyhow;
 use color_eyre::eyre::OptionExt;
+use color_eyre::eyre::WrapErr;
 use color_eyre::Result;
 use komorebi_themes::colour::Rgb;
 use miow::pipe::connect;
@@ -217,14 +217,6 @@ impl WindowManager {
                 self.focus_container_in_direction(direction)?;
                 self.promote_container_to_front()?
             }
-            SocketMessage::DisplayMonitorWorkspaceNumber(monitor_idx, workspace_idx) => {
-                self.send_always_on_top(
-                    Option::from(monitor_idx),
-                    Option::from(workspace_idx),
-                    None,
-                )?;
-                self.display_monitor_workspace(monitor_idx, workspace_idx)?;
-            }
             SocketMessage::EagerFocus(ref exe) => {
                 let focused_monitor_idx = self.focused_monitor_idx();
 
@@ -246,7 +238,7 @@ impl WindowManager {
                             // load it later after focusing the wanted window
                             let focused_ws_idx = monitor.focused_workspace_idx();
                             if focused_ws_idx != workspace_idx {
-                                monitor.set_last_focused_workspace(Option::from(focused_ws_idx));
+                                monitor.last_focused_workspace = Option::from(focused_ws_idx);
                                 monitor.focus_workspace(workspace_idx)?;
                                 needs_workspace_loading = true;
                             }
@@ -267,7 +259,7 @@ impl WindowManager {
                         }
                         WorkspaceWindowLocation::Maximized => {
                             if let Some(window) =
-                                self.focused_workspace_mut()?.maximized_window_mut()
+                                &mut self.focused_workspace_mut()?.maximized_window
                             {
                                 window.focus(self.mouse_follows_focus)?;
                             }
@@ -301,7 +293,7 @@ impl WindowManager {
             }
             SocketMessage::FocusWindow(direction) => {
                 let focused_workspace = self.focused_workspace()?;
-                match focused_workspace.layer() {
+                match focused_workspace.layer {
                     WorkspaceLayer::Tiling => {
                         self.focus_container_in_direction(direction)?;
                     }
@@ -310,12 +302,9 @@ impl WindowManager {
                     }
                 }
             }
-            SocketMessage::FocusExe(ref exe, hwnd) => {
-                self.focus_window_from_exe(exe, hwnd)?;
-            }
             SocketMessage::MoveWindow(direction) => {
                 let focused_workspace = self.focused_workspace()?;
-                match focused_workspace.layer() {
+                match focused_workspace.layer {
                     WorkspaceLayer::Tiling => {
                         self.move_container_in_direction(direction)?;
                     }
@@ -326,7 +315,7 @@ impl WindowManager {
             }
             SocketMessage::CycleFocusWindow(direction) => {
                 let focused_workspace = self.focused_workspace()?;
-                match focused_workspace.layer() {
+                match focused_workspace.layer {
                     WorkspaceLayer::Tiling => {
                         self.focus_container_in_cycle_direction(direction)?;
                     }
@@ -386,7 +375,7 @@ impl WindowManager {
                     .ok_or_eyre("no workspace at the given index")?;
 
                 if let Some(container) = workspace.containers_mut().get_mut(container_idx) {
-                    container.set_locked(true);
+                    container.locked = true;
                 }
             }
             SocketMessage::UnlockMonitorWorkspaceContainer(
@@ -405,14 +394,13 @@ impl WindowManager {
                     .ok_or_eyre("no workspace at the given index")?;
 
                 if let Some(container) = workspace.containers_mut().get_mut(container_idx) {
-                    container.set_locked(false);
+                    container.locked = false;
                 }
             }
             SocketMessage::ToggleLock => self.toggle_lock()?,
             SocketMessage::ToggleFloat => self.toggle_float(false)?,
             SocketMessage::ToggleMonocle => self.toggle_monocle()?,
             SocketMessage::ToggleMaximize => self.toggle_maximize()?,
-            SocketMessage::ToggleAlwaysOnTop => self.toggle_always_on_top()?,
             SocketMessage::ContainerPadding(monitor_idx, workspace_idx, size) => {
                 self.set_container_padding(monitor_idx, workspace_idx, size)?;
             }
@@ -630,7 +618,7 @@ impl WindowManager {
                 for (i, monitor) in self.monitors().iter().enumerate() {
                     for container in monitor
                         .focused_workspace()
-                        .ok_or_else(|| anyhow!("there is no workspace"))?
+                        .ok_or_eyre("there is no workspace")?
                         .containers()
                     {
                         for window in container.windows() {
@@ -664,11 +652,11 @@ impl WindowManager {
                     let monitor = self
                         .monitors_mut()
                         .get_mut(monitor_idx)
-                        .ok_or_else(|| anyhow!("there is no monitor"))?;
+                        .ok_or_eyre("there is no monitor")?;
 
                     monitor
                         .focused_workspace_mut()
-                        .ok_or_else(|| anyhow!("there is no focused workspace"))?
+                        .ok_or_eyre("there is no focused workspace")?
                         .remove_window(hwnd)?;
 
                     monitor.update_focused_workspace(offset)?;
@@ -677,9 +665,7 @@ impl WindowManager {
             SocketMessage::FocusedWorkspaceContainerPadding(adjustment) => {
                 let focused_monitor_idx = self.focused_monitor_idx();
 
-                let focused_monitor = self
-                    .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?;
+                let focused_monitor = self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                 let focused_workspace_idx = focused_monitor.focused_workspace_idx();
 
@@ -688,9 +674,7 @@ impl WindowManager {
             SocketMessage::FocusedWorkspacePadding(adjustment) => {
                 let focused_monitor_idx = self.focused_monitor_idx();
 
-                let focused_monitor = self
-                    .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?;
+                let focused_monitor = self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                 let focused_workspace_idx = focused_monitor.focused_workspace_idx();
 
@@ -720,18 +704,18 @@ impl WindowManager {
 
                 let idx = self
                     .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?
+                    .ok_or_eyre("there is no monitor")?
                     .focused_workspace_idx();
 
                 if let Some(monitor) = self.focused_monitor_mut() {
-                    if let Some(last_focused_workspace) = monitor.last_focused_workspace() {
+                    if let Some(last_focused_workspace) = monitor.last_focused_workspace {
                         self.move_container_to_workspace(last_focused_workspace, true, None)?;
                     }
                 }
 
                 self.focused_monitor_mut()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?
-                    .set_last_focused_workspace(Option::from(idx));
+                    .ok_or_eyre("there is no monitor")?
+                    .last_focused_workspace = Option::from(idx);
             }
             SocketMessage::SendContainerToLastWorkspace => {
                 // This is to ensure that even on an empty workspace on a secondary monitor, the
@@ -751,26 +735,23 @@ impl WindowManager {
 
                 let idx = self
                     .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?
+                    .ok_or_eyre("there is no monitor")?
                     .focused_workspace_idx();
 
                 if let Some(monitor) = self.focused_monitor_mut() {
-                    if let Some(last_focused_workspace) = monitor.last_focused_workspace() {
+                    if let Some(last_focused_workspace) = monitor.last_focused_workspace {
                         self.move_container_to_workspace(last_focused_workspace, false, None)?;
                     }
                 }
                 self.focused_monitor_mut()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?
-                    .set_last_focused_workspace(Option::from(idx));
+                    .ok_or_eyre("there is no monitor")?
+                    .last_focused_workspace = Option::from(idx);
             }
             SocketMessage::MoveContainerToWorkspaceNumber(workspace_idx) => {
                 self.move_container_to_workspace(workspace_idx, true, None)?;
-                self.send_always_on_top(None, Some(workspace_idx), Some(true))?;
             }
             SocketMessage::CycleMoveContainerToWorkspace(direction) => {
-                let focused_monitor = self
-                    .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?;
+                let focused_monitor = self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                 let focused_workspace_idx = focused_monitor.focused_workspace_idx();
                 let workspaces = focused_monitor.workspaces().len();
@@ -778,14 +759,12 @@ impl WindowManager {
                 let workspace_idx = direction.next_idx(
                     focused_workspace_idx,
                     NonZeroUsize::new(workspaces)
-                        .ok_or_else(|| anyhow!("there must be at least one workspace"))?,
+                        .ok_or_eyre("there must be at least one workspace")?,
                 );
 
                 self.move_container_to_workspace(workspace_idx, true, None)?;
-                self.send_always_on_top(None, Some(workspace_idx), Some(true))?;
             }
             SocketMessage::MoveContainerToMonitorNumber(monitor_idx) => {
-                self.send_always_on_top(Some(monitor_idx), None, Some(true))?;
                 let direction = self.direction_from_monitor_idx(monitor_idx);
                 self.move_container_to_monitor(monitor_idx, None, true, direction)?;
             }
@@ -796,22 +775,17 @@ impl WindowManager {
                 let monitor_idx = direction.next_idx(
                     self.focused_monitor_idx(),
                     NonZeroUsize::new(self.monitors().len())
-                        .ok_or_else(|| anyhow!("there must be at least one monitor"))?,
+                        .ok_or_eyre("there must be at least one monitor")?,
                 );
-
-                self.send_always_on_top(Some(monitor_idx), None, Some(true))?;
 
                 let direction = self.direction_from_monitor_idx(monitor_idx);
                 self.move_container_to_monitor(monitor_idx, None, true, direction)?;
             }
             SocketMessage::SendContainerToWorkspaceNumber(workspace_idx) => {
                 self.move_container_to_workspace(workspace_idx, false, None)?;
-                self.send_always_on_top(None, Some(workspace_idx), Some(false))?;
             }
             SocketMessage::CycleSendContainerToWorkspace(direction) => {
-                let focused_monitor = self
-                    .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?;
+                let focused_monitor = self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                 let focused_workspace_idx = focused_monitor.focused_workspace_idx();
                 let workspaces = focused_monitor.workspaces().len();
@@ -819,14 +793,12 @@ impl WindowManager {
                 let workspace_idx = direction.next_idx(
                     focused_workspace_idx,
                     NonZeroUsize::new(workspaces)
-                        .ok_or_else(|| anyhow!("there must be at least one workspace"))?,
+                        .ok_or_eyre("there must be at least one workspace")?,
                 );
 
                 self.move_container_to_workspace(workspace_idx, false, None)?;
-                self.send_always_on_top(None, Some(workspace_idx), Some(false))?;
             }
             SocketMessage::SendContainerToMonitorNumber(monitor_idx) => {
-                self.send_always_on_top(Some(monitor_idx), None, Some(false))?;
                 let direction = self.direction_from_monitor_idx(monitor_idx);
                 self.move_container_to_monitor(monitor_idx, None, false, direction)?;
             }
@@ -834,16 +806,13 @@ impl WindowManager {
                 let monitor_idx = direction.next_idx(
                     self.focused_monitor_idx(),
                     NonZeroUsize::new(self.monitors().len())
-                        .ok_or_else(|| anyhow!("there must be at least one monitor"))?,
+                        .ok_or_eyre("there must be at least one monitor")?,
                 );
-
-                self.send_always_on_top(Some(monitor_idx), None, Some(false))?;
 
                 let direction = self.direction_from_monitor_idx(monitor_idx);
                 self.move_container_to_monitor(monitor_idx, None, false, direction)?;
             }
             SocketMessage::SendContainerToMonitorWorkspaceNumber(monitor_idx, workspace_idx) => {
-                self.send_always_on_top(Some(monitor_idx), Some(workspace_idx), Some(false))?;
                 let direction = self.direction_from_monitor_idx(monitor_idx);
                 self.move_container_to_monitor(
                     monitor_idx,
@@ -853,7 +822,6 @@ impl WindowManager {
                 )?;
             }
             SocketMessage::MoveContainerToMonitorWorkspaceNumber(monitor_idx, workspace_idx) => {
-                self.send_always_on_top(Some(monitor_idx), Some(workspace_idx), Some(true))?;
                 let direction = self.direction_from_monitor_idx(monitor_idx);
                 self.move_container_to_monitor(
                     monitor_idx,
@@ -866,7 +834,6 @@ impl WindowManager {
                 if let Some((monitor_idx, workspace_idx)) =
                     self.monitor_workspace_index_by_name(workspace)
                 {
-                    self.send_always_on_top(Some(monitor_idx), Some(workspace_idx), Some(false))?;
                     let direction = self.direction_from_monitor_idx(monitor_idx);
                     self.move_container_to_monitor(
                         monitor_idx,
@@ -880,7 +847,6 @@ impl WindowManager {
                 if let Some((monitor_idx, workspace_idx)) =
                     self.monitor_workspace_index_by_name(workspace)
                 {
-                    self.send_always_on_top(Some(monitor_idx), Some(workspace_idx), Some(true))?;
                     let direction = self.direction_from_monitor_idx(monitor_idx);
                     self.move_container_to_monitor(
                         monitor_idx,
@@ -898,7 +864,7 @@ impl WindowManager {
                 let monitor_idx = direction.next_idx(
                     self.focused_monitor_idx(),
                     NonZeroUsize::new(self.monitors().len())
-                        .ok_or_else(|| anyhow!("there must be at least one monitor"))?,
+                        .ok_or_eyre("there must be at least one monitor")?,
                 );
 
                 self.move_workspace_to_monitor(monitor_idx)?;
@@ -920,7 +886,7 @@ impl WindowManager {
                 let monitor_idx = direction.next_idx(
                     self.focused_monitor_idx(),
                     NonZeroUsize::new(self.monitors().len())
-                        .ok_or_else(|| anyhow!("there must be at least one monitor"))?,
+                        .ok_or_eyre("there must be at least one monitor")?,
                 );
 
                 self.focus_monitor(monitor_idx)?;
@@ -949,7 +915,7 @@ impl WindowManager {
             SocketMessage::ScrollingLayoutColumns(count) => {
                 let focused_workspace = self.focused_workspace_mut()?;
 
-                let options = match focused_workspace.layout_options() {
+                let options = match focused_workspace.layout_options {
                     Some(mut opts) => {
                         if let Some(scrolling) = &mut opts.scrolling {
                             scrolling.columns = count.into();
@@ -964,7 +930,7 @@ impl WindowManager {
                     },
                 };
 
-                focused_workspace.set_layout_options(Some(options));
+                focused_workspace.layout_options = Some(options);
                 self.update_focused_workspace(false, false)?;
             }
             SocketMessage::ChangeLayout(layout) => self.change_workspace_layout_default(layout)?,
@@ -1082,9 +1048,7 @@ impl WindowManager {
                     }
                 }
 
-                let focused_monitor = self
-                    .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?;
+                let focused_monitor = self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                 let focused_workspace_idx = focused_monitor.focused_workspace_idx();
                 let workspaces = focused_monitor.workspaces().len();
@@ -1092,10 +1056,8 @@ impl WindowManager {
                 let workspace_idx = direction.next_idx(
                     focused_workspace_idx,
                     NonZeroUsize::new(workspaces)
-                        .ok_or_else(|| anyhow!("there must be at least one workspace"))?,
+                        .ok_or_eyre("there must be at least one workspace")?,
                 );
-
-                self.send_always_on_top(None, Option::from(workspace_idx), None)?;
 
                 self.focus_workspace(workspace_idx)?;
             }
@@ -1115,9 +1077,7 @@ impl WindowManager {
                     }
                 }
 
-                let focused_monitor = self
-                    .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?;
+                let focused_monitor = self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                 let focused_workspace_idx = focused_monitor.focused_workspace_idx();
                 let workspaces = focused_monitor.workspaces().len();
@@ -1134,14 +1094,14 @@ impl WindowManager {
                     let mut workspace_idx = direction.next_idx(
                         focused_workspace_idx,
                         NonZeroUsize::new(workspaces)
-                            .ok_or_else(|| anyhow!("there must be at least one workspace"))?,
+                            .ok_or_eyre("there must be at least one workspace")?,
                     );
 
                     while !empty_workspaces.contains(&workspace_idx) {
                         workspace_idx = direction.next_idx(
                             workspace_idx,
                             NonZeroUsize::new(workspaces)
-                                .ok_or_else(|| anyhow!("there must be at least one workspace"))?,
+                                .ok_or_eyre("there must be at least one workspace")?,
                         );
                     }
 
@@ -1174,9 +1134,9 @@ impl WindowManager {
                         if monitor.workspaces().len() > 1
                             && workspace.containers().is_empty()
                             && workspace.floating_windows().is_empty()
-                            && workspace.monocle_container().is_none()
-                            && workspace.maximized_window().is_none()
-                            && workspace.name().is_none()
+                            && workspace.monocle_container.is_none()
+                            && workspace.maximized_window.is_none()
+                            && workspace.name.is_none()
                         {
                             can_close = true;
                         }
@@ -1210,19 +1170,18 @@ impl WindowManager {
 
                 let idx = self
                     .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?
+                    .ok_or_eyre("there is no monitor")?
                     .focused_workspace_idx();
 
                 if let Some(monitor) = self.focused_monitor_mut() {
-                    if let Some(last_focused_workspace) = monitor.last_focused_workspace() {
-                        self.send_always_on_top(None, Option::from(last_focused_workspace), None)?;
+                    if let Some(last_focused_workspace) = monitor.last_focused_workspace {
                         self.focus_workspace(last_focused_workspace)?;
                     }
                 }
 
                 self.focused_monitor_mut()
-                    .ok_or_else(|| anyhow!("there is no monitor"))?
-                    .set_last_focused_workspace(Option::from(idx));
+                    .ok_or_eyre("there is no monitor")?
+                    .last_focused_workspace = Option::from(idx);
             }
             SocketMessage::FocusWorkspaceNumber(workspace_idx) => {
                 // This is to ensure that even on an empty workspace on a secondary monitor, the
@@ -1241,7 +1200,6 @@ impl WindowManager {
                 }
 
                 if self.focused_workspace_idx().unwrap_or_default() != workspace_idx {
-                    self.send_always_on_top(None, Option::from(workspace_idx), None)?;
                     self.focus_workspace(workspace_idx)?;
                 }
             }
@@ -1263,16 +1221,6 @@ impl WindowManager {
 
                 let focused_monitor_idx = self.focused_monitor_idx();
 
-                for i in 0..self.monitors.elements().len() {
-                    if i != focused_monitor_idx {
-                        self.send_always_on_top(
-                            Option::from(i),
-                            Option::from(workspace_idx),
-                            None,
-                        )?;
-                    }
-                }
-
                 for (i, monitor) in self.monitors_mut().iter_mut().enumerate() {
                     if i != focused_monitor_idx {
                         monitor.focus_workspace(workspace_idx)?;
@@ -1280,11 +1228,6 @@ impl WindowManager {
                     }
                 }
 
-                self.send_always_on_top(
-                    Option::from(focused_monitor_idx),
-                    Some(workspace_idx),
-                    None,
-                )?;
                 self.focus_workspace(workspace_idx)?;
             }
             SocketMessage::FocusMonitorWorkspaceNumber(monitor_idx, workspace_idx) => {
@@ -1294,7 +1237,6 @@ impl WindowManager {
                 let focused_pair = (focused_monitor_idx, focused_workspace_idx);
 
                 if focused_pair != (monitor_idx, workspace_idx) {
-                    self.send_always_on_top(Option::from(monitor_idx), Some(workspace_idx), None)?;
                     self.focus_monitor(monitor_idx)?;
                     self.focus_workspace(workspace_idx)?;
                 }
@@ -1303,7 +1245,6 @@ impl WindowManager {
                 if let Some((monitor_idx, workspace_idx)) =
                     self.monitor_workspace_index_by_name(name)
                 {
-                    self.send_always_on_top(Option::from(monitor_idx), Some(workspace_idx), None)?;
                     self.focus_monitor(monitor_idx)?;
                     self.focus_workspace(workspace_idx)?;
                 }
@@ -1313,9 +1254,9 @@ impl WindowManager {
                 let workspace = self.focused_workspace_mut()?;
 
                 let mut to_focus = None;
-                match workspace.layer() {
+                match workspace.layer {
                     WorkspaceLayer::Tiling => {
-                        workspace.set_layer(WorkspaceLayer::Floating);
+                        workspace.layer = WorkspaceLayer::Floating;
 
                         let focused_idx = workspace.focused_floating_window_idx();
                         let mut window_idx_pairs = workspace
@@ -1354,16 +1295,16 @@ impl WindowManager {
                             }
                         }
 
-                        if let Some(monocle) = workspace.monocle_container() {
+                        if let Some(monocle) = &workspace.monocle_container {
                             if let Some(window) = monocle.focused_window() {
                                 window.lower()?;
                             }
                         }
                     }
                     WorkspaceLayer::Floating => {
-                        workspace.set_layer(WorkspaceLayer::Tiling);
+                        workspace.layer = WorkspaceLayer::Tiling;
 
-                        if let Some(monocle) = workspace.monocle_container() {
+                        if let Some(monocle) = &workspace.monocle_container {
                             if let Some(window) = monocle.focused_window() {
                                 to_focus = Some(*window);
                                 window.raise()?;
@@ -1470,7 +1411,7 @@ impl WindowManager {
                 for monitor in self.monitors() {
                     if let Some(ws) = monitor.focused_workspace() {
                         monitor_visible_windows.insert(
-                            monitor.device_id().clone(),
+                            monitor.device_id.clone(),
                             ws.visible_window_details().clone(),
                         );
                     }
@@ -1497,7 +1438,7 @@ impl WindowManager {
                     StateQuery::FocusedMonitorIndex => self.focused_monitor_idx().to_string(),
                     StateQuery::FocusedWorkspaceIndex => self
                         .focused_monitor()
-                        .ok_or_else(|| anyhow!("there is no monitor"))?
+                        .ok_or_eyre("there is no monitor")?
                         .focused_workspace_idx()
                         .to_string(),
                     StateQuery::FocusedContainerIndex => self
@@ -1508,9 +1449,8 @@ impl WindowManager {
                         self.focused_container()?.focused_window_idx().to_string()
                     }
                     StateQuery::FocusedWorkspaceName => {
-                        let focused_monitor = self
-                            .focused_monitor()
-                            .ok_or_else(|| anyhow!("there is no monitor"))?;
+                        let focused_monitor =
+                            self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                         focused_monitor
                             .focused_workspace_name()
@@ -1518,9 +1458,8 @@ impl WindowManager {
                     }
                     StateQuery::Version => build::RUST_VERSION.to_string(),
                     StateQuery::FocusedWorkspaceLayout => {
-                        let focused_monitor = self
-                            .focused_monitor()
-                            .ok_or_else(|| anyhow!("there is no monitor"))?;
+                        let focused_monitor =
+                            self.focused_monitor().ok_or_eyre("there is no monitor")?;
 
                         focused_monitor.focused_workspace_layout().map_or_else(
                             || "None".to_string(),
@@ -1554,9 +1493,9 @@ impl WindowManager {
                 // with this signal
                 let workspace = self.focused_workspace_mut()?;
                 let container_len = workspace.containers().len();
-                let no_layout_rules = workspace.layout_rules().is_empty();
+                let no_layout_rules = workspace.layout_rules.is_empty();
 
-                if let Layout::Custom(ref mut custom) = workspace.layout_mut() {
+                if let Layout::Custom(ref mut custom) = &mut workspace.layout {
                     if matches!(axis, Axis::Horizontal) {
                         #[allow(clippy::cast_precision_loss)]
                         let percentage = custom
@@ -1573,7 +1512,7 @@ impl WindowManager {
                                 }
                             }
                         } else {
-                            for rule in workspace.layout_rules_mut() {
+                            for rule in &mut workspace.layout_rules {
                                 if container_len >= rule.0 {
                                     if let Layout::Custom(ref mut custom) = rule.1 {
                                         match sizing {
@@ -1929,29 +1868,28 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
             }
             SocketMessage::MonitorWorkAreaOffset(monitor_idx, rect) => {
                 if let Some(monitor) = self.monitors_mut().get_mut(monitor_idx) {
-                    monitor.set_work_area_offset(Option::from(rect));
+                    monitor.work_area_offset = Option::from(rect);
                     self.retile_all(false)?;
                 }
             }
             SocketMessage::WorkspaceWorkAreaOffset(monitor_idx, workspace_idx, rect) => {
                 if let Some(monitor) = self.monitors_mut().get_mut(monitor_idx) {
                     if let Some(workspace) = monitor.workspaces_mut().get_mut(workspace_idx) {
-                        workspace.set_work_area_offset(Option::from(rect));
+                        workspace.work_area_offset = Option::from(rect);
                         self.retile_all(false)?
                     }
                 }
             }
             SocketMessage::ToggleWindowBasedWorkAreaOffset => {
                 let workspace = self.focused_workspace_mut()?;
-                workspace.set_apply_window_based_work_area_offset(
-                    !workspace.apply_window_based_work_area_offset(),
-                );
+                workspace.apply_window_based_work_area_offset =
+                    !workspace.apply_window_based_work_area_offset;
 
                 self.retile_all(true)?;
             }
             SocketMessage::QuickSave => {
                 let workspace = self.focused_workspace()?;
-                let resize = workspace.resize_dimensions();
+                let resize = &workspace.resize_dimensions;
 
                 let quicksave_json = std::env::temp_dir().join("komorebi.quicksave.json");
 
@@ -1968,17 +1906,19 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
 
                 let quicksave_json = std::env::temp_dir().join("komorebi.quicksave.json");
 
-                let file = File::open(&quicksave_json)
-                    .map_err(|_| anyhow!("no quicksave found at {}", quicksave_json.display()))?;
+                let file = File::open(&quicksave_json).wrap_err(format!(
+                    "no quicksave found at {}",
+                    quicksave_json.display()
+                ))?;
 
                 let resize: Vec<Option<Rect>> = serde_json::from_reader(file)?;
 
-                workspace.set_resize_dimensions(resize);
+                workspace.resize_dimensions = resize;
                 self.update_focused_workspace(false, false)?;
             }
             SocketMessage::Save(ref path) => {
                 let workspace = self.focused_workspace_mut()?;
-                let resize = workspace.resize_dimensions();
+                let resize = &workspace.resize_dimensions;
 
                 let file = OpenOptions::new()
                     .write(true)
@@ -1992,11 +1932,11 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
                 let workspace = self.focused_workspace_mut()?;
 
                 let file =
-                    File::open(path).map_err(|_| anyhow!("no file found at {}", path.display()))?;
+                    File::open(path).wrap_err(format!("no file found at {}", path.display()))?;
 
                 let resize: Vec<Option<Rect>> = serde_json::from_reader(file)?;
 
-                workspace.set_resize_dimensions(resize);
+                workspace.resize_dimensions = resize;
                 self.update_focused_workspace(false, false)?;
             }
             SocketMessage::AddSubscriberSocket(ref socket) => {
@@ -2019,9 +1959,9 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
             SocketMessage::AddSubscriberPipe(ref subscriber) => {
                 let mut pipes = SUBSCRIPTION_PIPES.lock();
                 let pipe_path = format!(r"\\.\pipe\{subscriber}");
-                let pipe = connect(&pipe_path).map_err(|_| {
-                    anyhow!("the named pipe '{}' has not yet been created; please create it before running this command", pipe_path)
-                })?;
+                let pipe = connect(&pipe_path).wrap_err(
+                    format!("the named pipe '{}' has not yet been created; please create it before running this command", pipe_path)
+                )?;
 
                 pipes.insert(subscriber.clone(), pipe);
             }
@@ -2056,9 +1996,8 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
             }
             SocketMessage::ToggleWorkspaceWindowContainerBehaviour => {
                 let current_global_behaviour = self.window_management_behaviour.current_behaviour;
-                if let Some(behaviour) = self
-                    .focused_workspace_mut()?
-                    .window_container_behaviour_mut()
+                if let Some(behaviour) =
+                    &mut self.focused_workspace_mut()?.window_container_behaviour
                 {
                     match behaviour {
                         WindowContainerBehaviour::Create => {
@@ -2069,20 +2008,19 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
                         }
                     }
                 } else {
-                    self.focused_workspace_mut()?
-                        .set_window_container_behaviour(Some(match current_global_behaviour {
+                    self.focused_workspace_mut()?.window_container_behaviour =
+                        Some(match current_global_behaviour {
                             WindowContainerBehaviour::Create => WindowContainerBehaviour::Append,
                             WindowContainerBehaviour::Append => WindowContainerBehaviour::Create,
-                        }));
+                        });
                 };
             }
             SocketMessage::ToggleWorkspaceFloatOverride => {
                 let current_global_override = self.window_management_behaviour.float_override;
-                if let Some(float_override) = self.focused_workspace_mut()?.float_override_mut() {
+                if let Some(float_override) = &mut self.focused_workspace_mut()?.float_override {
                     *float_override = !*float_override;
                 } else {
-                    self.focused_workspace_mut()?
-                        .set_float_override(Some(!current_global_override));
+                    self.focused_workspace_mut()?.float_override = Some(!current_global_override);
                 };
             }
             SocketMessage::WindowHidingBehaviour(behaviour) => {

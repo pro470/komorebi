@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use color_eyre::eyre::anyhow;
+use color_eyre::eyre::OptionExt;
 use color_eyre::Result;
 use crossbeam_utils::atomic::AtomicConsume;
 use parking_lot::Mutex;
@@ -311,7 +311,7 @@ impl WindowManager {
                 // containers - this makes floating windows on empty workspaces go into very
                 // annoying focus change loops which prevents users from interacting with them
                 if !matches!(
-                    self.focused_workspace()?.layout(),
+                    self.focused_workspace()?.layout,
                     Layout::Default(DefaultLayout::Scrolling)
                 ) && !self.focused_workspace()?.containers().is_empty()
                 {
@@ -326,13 +326,13 @@ impl WindowManager {
 
                 match floating_window_idx {
                     None => {
-                        if let Some(w) = workspace.maximized_window() {
+                        if let Some(w) = &workspace.maximized_window {
                             if w.hwnd == window.hwnd {
                                 return Ok(());
                             }
                         }
 
-                        if let Some(monocle) = workspace.monocle_container() {
+                        if let Some(monocle) = &workspace.monocle_container {
                             if let Some(window) = monocle.focused_window() {
                                 window.focus(false)?;
                             }
@@ -340,10 +340,10 @@ impl WindowManager {
                             workspace.focus_container_by_window(window.hwnd)?;
                         }
 
-                        workspace.set_layer(WorkspaceLayer::Tiling);
+                        workspace.layer = WorkspaceLayer::Tiling;
 
                         if matches!(
-                            self.focused_workspace()?.layout(),
+                            self.focused_workspace()?.layout,
                             Layout::Default(DefaultLayout::Scrolling)
                         ) && !self.focused_workspace()?.containers().is_empty()
                         {
@@ -352,7 +352,7 @@ impl WindowManager {
                     }
                     Some(idx) => {
                         if let Some(_window) = workspace.floating_windows().get(idx) {
-                            workspace.set_layer(WorkspaceLayer::Floating);
+                            workspace.layer = WorkspaceLayer::Floating;
                         }
                     }
                 }
@@ -422,7 +422,7 @@ impl WindowManager {
                         );
                         let workspace = self.focused_workspace_mut()?;
                         let workspace_contains_window = workspace.contains_window(window.hwnd);
-                        let monocle_container = workspace.monocle_container().clone();
+                        let monocle_container = workspace.monocle_container.clone();
 
                         if !workspace_contains_window && needs_reconciliation.is_none() {
                             let floating_applications = FLOATING_APPLICATIONS.lock();
@@ -465,11 +465,11 @@ impl WindowManager {
                                 let center_spawned_floats =
                                     placement.should_center() && workspace.tile;
                                 workspace.floating_windows_mut().push_back(window);
-                                workspace.set_layer(WorkspaceLayer::Floating);
+                                workspace.layer = WorkspaceLayer::Floating;
                                 if center_spawned_floats {
                                     let mut floating_window = window;
                                     floating_window.center(
-                                        &workspace.globals().work_area,
+                                        &workspace.globals.work_area,
                                         placement.should_resize(),
                                     )?;
                                 }
@@ -478,17 +478,15 @@ impl WindowManager {
                                 match behaviour.current_behaviour {
                                     WindowContainerBehaviour::Create => {
                                         workspace.new_container_for_window(window);
-                                        workspace.set_layer(WorkspaceLayer::Tiling);
+                                        workspace.layer = WorkspaceLayer::Tiling;
                                         self.update_focused_workspace(false, false)?;
                                     }
                                     WindowContainerBehaviour::Append => {
                                         workspace
                                             .focused_container_mut()
-                                            .ok_or_else(|| {
-                                                anyhow!("there is no focused container")
-                                            })?
+                                            .ok_or_eyre("there is no focused container")?
                                             .add_window(window);
-                                        workspace.set_layer(WorkspaceLayer::Tiling);
+                                        workspace.layer = WorkspaceLayer::Tiling;
                                         self.update_focused_workspace(true, false)?;
                                         stackbar_manager::send_notification();
                                     }
@@ -522,8 +520,7 @@ impl WindowManager {
                             }
 
                             let workspace = self.focused_workspace()?;
-                            if !(monocle_window_event
-                                || workspace.layer() != &WorkspaceLayer::Tiling)
+                            if !(monocle_window_event || workspace.layer != WorkspaceLayer::Tiling)
                                 && monocle_container.is_some()
                             {
                                 window.hide();
@@ -536,7 +533,7 @@ impl WindowManager {
                 let monitor_idx = self.focused_monitor_idx();
                 let workspace_idx = self
                     .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor with this idx"))?
+                    .ok_or_eyre("there is no monitor with this idx")?
                     .focused_workspace_idx();
 
                 WindowsApi::bring_window_to_top(window.hwnd)?;
@@ -566,7 +563,7 @@ impl WindowManager {
 
                 let target_monitor_idx = self
                     .monitor_idx_from_current_pos()
-                    .ok_or_else(|| anyhow!("cannot get monitor idx from current position"))?;
+                    .ok_or_eyre("cannot get monitor idx from current position")?;
 
                 let focused_monitor_idx = self.focused_monitor_idx();
                 let focused_workspace_idx = self.focused_workspace_idx().unwrap_or_default();
@@ -577,7 +574,7 @@ impl WindowManager {
                 let focused_container_idx = workspace.focused_container_idx();
                 let new_position = WindowsApi::window_rect(window.hwnd)?;
                 let old_position = *workspace
-                    .latest_layout()
+                    .latest_layout
                     .get(focused_container_idx)
                     // If the move was to another monitor with an empty workspace, the
                     // workspace here will refer to that empty workspace, which won't
@@ -610,10 +607,10 @@ impl WindowManager {
                             let origin_workspace = self
                                 .monitors()
                                 .get(origin_monitor_idx)
-                                .ok_or_else(|| anyhow!("cannot get monitor idx"))?
+                                .ok_or_eyre("cannot get monitor idx")?
                                 .workspaces()
                                 .get(origin_workspace_idx)
-                                .ok_or_else(|| anyhow!("cannot get workspace idx"))?;
+                                .ok_or_eyre("cannot get workspace idx")?;
 
                             let managed_window = origin_workspace.contains_window(window.hwnd);
 
@@ -625,7 +622,7 @@ impl WindowManager {
                 }
 
                 let workspace = self.focused_workspace_mut()?;
-                if (*workspace.tile() && workspace.contains_managed_window(window.hwnd))
+                if (workspace.tile && workspace.contains_managed_window(window.hwnd))
                     || moved_across_monitors
                 {
                     let resize = Rect {
@@ -653,17 +650,15 @@ impl WindowManager {
                                 let target_workspace_idx = self
                                     .monitors()
                                     .get(target_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?
+                                    .ok_or_eyre("there is no monitor at this idx")?
                                     .focused_workspace_idx();
 
                                 let target_container_idx = self
                                     .monitors()
                                     .get(target_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?
+                                    .ok_or_eyre("there is no monitor at this idx")?
                                     .focused_workspace()
-                                    .ok_or_else(|| {
-                                        anyhow!("there is no focused workspace for this monitor")
-                                    })?
+                                    .ok_or_eyre("there is no focused workspace for this monitor")?
                                     .container_idx_from_current_point()
                                     // Default to 0 in the case of an empty workspace
                                     .unwrap_or(0);
@@ -683,7 +678,7 @@ impl WindowManager {
                                 let origin_monitor = self
                                     .monitors_mut()
                                     .get_mut(origin_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?;
+                                    .ok_or_eyre("there is no monitor at this idx")?;
                                 origin_monitor.focus_workspace(origin_workspace_idx)?;
                                 self.update_focused_workspace(false, false)?;
 
@@ -691,7 +686,7 @@ impl WindowManager {
                                 let target_monitor = self
                                     .monitors_mut()
                                     .get_mut(target_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?;
+                                    .ok_or_eyre("there is no monitor at this idx")?;
                                 target_monitor.focus_workspace(target_workspace_idx)?;
                                 self.update_focused_workspace(false, false)?;
 
@@ -843,7 +838,7 @@ impl WindowManager {
                     .and_then(|m| m.workspaces().get(*ws_idx))
                 {
                     if let Some(monocle_with_window) = target_workspace
-                        .monocle_container()
+                        .monocle_container
                         .as_ref()
                         .and_then(|m| m.contains_window(window.hwnd).then_some(m))
                     {
@@ -893,13 +888,13 @@ impl WindowManager {
         if let Some(monitor) = self.focused_monitor_mut() {
             if ws_idx != monitor.focused_workspace_idx() {
                 let previous_idx = monitor.focused_workspace_idx();
-                monitor.set_last_focused_workspace(Option::from(previous_idx));
+                monitor.last_focused_workspace = Option::from(previous_idx);
                 monitor.focus_workspace(ws_idx)?;
             }
             if let Some(workspace) = monitor.focused_workspace_mut() {
                 let mut layer = WorkspaceLayer::Tiling;
                 if let Some((monocle, idx)) = workspace
-                    .monocle_container_mut()
+                    .monocle_container
                     .as_mut()
                     .and_then(|m| m.idx_for_window(window.hwnd).map(|i| (m, i)))
                 {
@@ -910,14 +905,14 @@ impl WindowManager {
                     .any(|w| w.hwnd == window.hwnd)
                 {
                     layer = WorkspaceLayer::Floating;
-                } else if !workspace
-                    .maximized_window()
-                    .is_some_and(|w| w.hwnd == window.hwnd)
+                } else if workspace
+                    .maximized_window
+                    .is_none_or(|w| w.hwnd != window.hwnd)
                 {
                     // If the window is the maximized window do nothing, else we
                     // reintegrate the monocle if it exists and then focus the
                     // container
-                    if workspace.monocle_container().is_some() {
+                    if workspace.monocle_container.is_some() {
                         tracing::info!("disabling monocle");
                         for container in workspace.containers_mut() {
                             container.restore();
@@ -929,7 +924,7 @@ impl WindowManager {
                     }
                     workspace.focus_container_by_window(window.hwnd)?;
                 }
-                workspace.set_layer(layer);
+                workspace.layer = layer;
             }
             monitor.load_focused_workspace(mouse_follows_focus)?;
             monitor.update_focused_workspace(offset)?;
