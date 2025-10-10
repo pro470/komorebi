@@ -3,12 +3,12 @@ use crate::config::LabelPrefix;
 use crate::render::RenderConfig;
 use crate::selected_frame::SelectableFrame;
 use crate::widgets::widget::BarWidget;
-use eframe::egui::text::LayoutJob;
 use eframe::egui::Align;
 use eframe::egui::Context;
 use eframe::egui::Label;
 use eframe::egui::TextFormat;
 use eframe::egui::Ui;
+use eframe::egui::text::LayoutJob;
 use serde::Deserialize;
 use serde::Serialize;
 use std::process::Command;
@@ -156,17 +156,15 @@ impl BarWidget for Storage {
                     if SelectableFrame::new_auto(output.selected, auto_focus_fill)
                         .show(ui, |ui| ui.add(Label::new(layout_job).selectable(false)))
                         .clicked()
-                    {
-                        if let Err(error) = Command::new("cmd.exe")
+                        && let Err(error) = Command::new("cmd.exe")
                             .args([
                                 "/C",
                                 "explorer.exe",
                                 output.label.split(' ').collect::<Vec<&str>>()[0],
                             ])
                             .spawn()
-                        {
-                            eprintln!("{error}")
-                        }
+                    {
+                        eprintln!("{error}")
                     }
                 });
             }

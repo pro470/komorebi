@@ -1,4 +1,6 @@
 use super::ImageIcon;
+use crate::MAX_LABEL_WIDTH;
+use crate::MONITOR_INDEX;
 use crate::config::DisplayFormat;
 use crate::config::DisplayFormat::*;
 use crate::config::WorkspacesDisplayFormat;
@@ -7,10 +9,6 @@ use crate::selected_frame::SelectableFrame;
 use crate::ui::CustomUi;
 use crate::widgets::komorebi_layout::KomorebiLayout;
 use crate::widgets::widget::BarWidget;
-use crate::MAX_LABEL_WIDTH;
-use crate::MONITOR_INDEX;
-use eframe::egui::text::LayoutJob;
-use eframe::egui::vec2;
 use eframe::egui::Align;
 use eframe::egui::Color32;
 use eframe::egui::Context;
@@ -28,6 +26,8 @@ use eframe::egui::StrokeKind;
 use eframe::egui::TextFormat;
 use eframe::egui::Ui;
 use eframe::egui::Vec2;
+use eframe::egui::text::LayoutJob;
+use eframe::egui::vec2;
 use komorebi_client::Container;
 use komorebi_client::PathExt;
 use komorebi_client::Rect;
@@ -271,14 +271,14 @@ impl Komorebi {
     }
 
     fn render_layout(&mut self, ctx: &Context, ui: &mut Ui, config: &mut RenderConfig) {
-        if let Some(layout_config) = &self.layout {
-            if layout_config.enable {
-                let monitor_info = &mut *self.monitor_info.borrow_mut();
-                let workspace_idx = monitor_info.focused_workspace_idx;
-                monitor_info
-                    .layout
-                    .show(ctx, ui, config, layout_config, workspace_idx);
-            }
+        if let Some(layout_config) = &self.layout
+            && layout_config.enable
+        {
+            let monitor_info = &mut *self.monitor_info.borrow_mut();
+            let workspace_idx = monitor_info.focused_workspace_idx;
+            monitor_info
+                .layout
+                .show(ctx, ui, config, layout_config, workspace_idx);
         }
     }
 
@@ -558,10 +558,8 @@ impl FocusedContainerBar {
                     ui.add(img.fit_to_exact_size(self.icon_size));
                 }
             });
-        if HOVEL {
-            if let Some(title) = &info.title {
-                inner_response.response.on_hover_text(title);
-            }
+        if HOVEL && let Some(title) = &info.title {
+            inner_response.response.on_hover_text(title);
         }
     }
 

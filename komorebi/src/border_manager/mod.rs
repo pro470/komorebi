@@ -1,6 +1,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
 mod border;
+use crate::WindowManager;
+use crate::WindowsApi;
 use crate::core::BorderImplementation;
 use crate::core::BorderStyle;
 use crate::core::WindowKind;
@@ -8,10 +10,8 @@ use crate::ring::Ring;
 use crate::windows_api;
 use crate::workspace::Workspace;
 use crate::workspace::WorkspaceLayer;
-use crate::WindowManager;
-use crate::WindowsApi;
-use border::border_hwnds;
 pub use border::Border;
+use border::border_hwnds;
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
 use crossbeam_utils::atomic::AtomicCell;
@@ -22,15 +22,15 @@ use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use strum::Display;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::ID2D1HwndRenderTarget;
@@ -170,13 +170,15 @@ fn window_kind_colour(focus_kind: WindowKind) -> u32 {
 }
 
 pub fn listen_for_notifications(wm: Arc<Mutex<WindowManager>>) {
-    std::thread::spawn(move || loop {
-        match handle_notifications(wm.clone()) {
-            Ok(()) => {
-                tracing::warn!("restarting finished thread");
-            }
-            Err(error) => {
-                tracing::warn!("restarting failed thread: {}", error);
+    std::thread::spawn(move || {
+        loop {
+            match handle_notifications(wm.clone()) {
+                Ok(()) => {
+                    tracing::warn!("restarting finished thread");
+                }
+                Err(error) => {
+                    tracing::warn!("restarting failed thread: {}", error);
+                }
             }
         }
     });
@@ -339,15 +341,11 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                             should_process_notification = true;
                         }
 
-                        if !should_process_notification {
-                            if let Some(Notification::Update(ref previous)) = previous_notification
-                            {
-                                if previous.unwrap_or_default()
-                                    != notification_hwnd.unwrap_or_default()
-                                {
-                                    should_process_notification = true;
-                                }
-                            }
+                        if !should_process_notification
+                            && let Some(Notification::Update(ref previous)) = previous_notification
+                            && previous.unwrap_or_default() != notification_hwnd.unwrap_or_default()
+                        {
+                            should_process_notification = true;
                         }
 
                         should_process_notification

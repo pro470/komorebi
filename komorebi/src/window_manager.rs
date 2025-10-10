@@ -8,27 +8,25 @@ use std::net::Shutdown;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use color_eyre::eyre::bail;
-use color_eyre::eyre::OptionExt;
 use color_eyre::Result;
+use color_eyre::eyre::OptionExt;
+use color_eyre::eyre::bail;
 use crossbeam_channel::Receiver;
-use hotwatch::notify::ErrorKind as NotifyErrorKind;
 use hotwatch::EventKind;
 use hotwatch::Hotwatch;
+use hotwatch::notify::ErrorKind as NotifyErrorKind;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use uds_windows::UnixListener;
 use uds_windows::UnixStream;
 
-use crate::animation::AnimationEngine;
 use crate::animation::ANIMATION_ENABLED_GLOBAL;
 use crate::animation::ANIMATION_ENABLED_PER_ANIMATION;
-use crate::core::config_generation::MatchingRule;
-use crate::core::custom_layout::CustomLayout;
+use crate::animation::AnimationEngine;
 use crate::core::Arrangement;
 use crate::core::Axis;
 use crate::core::BorderImplementation;
@@ -46,7 +44,31 @@ use crate::core::Sizing;
 use crate::core::StackbarLabel;
 use crate::core::WindowContainerBehaviour;
 use crate::core::WindowManagementBehaviour;
+use crate::core::config_generation::MatchingRule;
+use crate::core::custom_layout::CustomLayout;
 
+use crate::BorderColours;
+use crate::CUSTOM_FFM;
+use crate::Colour;
+use crate::CrossBoundaryBehaviour;
+use crate::DATA_DIR;
+use crate::DISPLAY_INDEX_PREFERENCES;
+use crate::DUPLICATE_MONITOR_SERIAL_IDS;
+use crate::HIDING_BEHAVIOUR;
+use crate::HOME_DIR;
+use crate::IGNORE_IDENTIFIERS;
+use crate::LAYERED_WHITELIST;
+use crate::MANAGE_IDENTIFIERS;
+use crate::MONITOR_INDEX_PREFERENCES;
+use crate::NO_TITLEBAR;
+use crate::OBJECT_NAME_CHANGE_ON_LAUNCH;
+use crate::REGEX_IDENTIFIERS;
+use crate::REMOVE_TITLEBARS;
+use crate::Rgb;
+use crate::SUBSCRIPTION_SOCKETS;
+use crate::TRANSPARENCY_BLACKLIST;
+use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
+use crate::WORKSPACE_MATCHING_RULES;
 use crate::border_manager;
 use crate::border_manager::BORDER_OFFSET;
 use crate::border_manager::BORDER_WIDTH;
@@ -77,28 +99,6 @@ use crate::windows_api::WindowsApi;
 use crate::winevent_listener;
 use crate::workspace::Workspace;
 use crate::workspace::WorkspaceLayer;
-use crate::BorderColours;
-use crate::Colour;
-use crate::CrossBoundaryBehaviour;
-use crate::Rgb;
-use crate::CUSTOM_FFM;
-use crate::DATA_DIR;
-use crate::DISPLAY_INDEX_PREFERENCES;
-use crate::DUPLICATE_MONITOR_SERIAL_IDS;
-use crate::HIDING_BEHAVIOUR;
-use crate::HOME_DIR;
-use crate::IGNORE_IDENTIFIERS;
-use crate::LAYERED_WHITELIST;
-use crate::MANAGE_IDENTIFIERS;
-use crate::MONITOR_INDEX_PREFERENCES;
-use crate::NO_TITLEBAR;
-use crate::OBJECT_NAME_CHANGE_ON_LAUNCH;
-use crate::REGEX_IDENTIFIERS;
-use crate::REMOVE_TITLEBARS;
-use crate::SUBSCRIPTION_SOCKETS;
-use crate::TRANSPARENCY_BLACKLIST;
-use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
-use crate::WORKSPACE_MATCHING_RULES;
 
 #[derive(Debug)]
 pub struct WindowManager {
@@ -488,11 +488,11 @@ impl WindowManager {
                     }
                 }
 
-                if let Some(window) = workspace.maximized_window {
-                    if window.exe().is_err() {
-                        can_apply = false;
-                        break;
-                    }
+                if let Some(window) = workspace.maximized_window
+                    && window.exe().is_err()
+                {
+                    can_apply = false;
+                    break;
                 }
 
                 if let Some(container) = &workspace.monocle_container {
@@ -524,21 +524,20 @@ impl WindowManager {
             for (monitor_idx, monitor) in self.monitors_mut().iter_mut().enumerate() {
                 let mut focused_workspace = 0;
                 for (workspace_idx, workspace) in monitor.workspaces_mut().iter_mut().enumerate() {
-                    if let Some(state_monitor) = state.monitors.elements().get(monitor_idx) {
-                        if let Some(state_workspace) = state_monitor.workspaces().get(workspace_idx)
-                        {
-                            // to make sure padding changes get applied for users after a quick restart
-                            let container_padding = workspace.container_padding;
-                            let workspace_padding = workspace.workspace_padding;
+                    if let Some(state_monitor) = state.monitors.elements().get(monitor_idx)
+                        && let Some(state_workspace) = state_monitor.workspaces().get(workspace_idx)
+                    {
+                        // to make sure padding changes get applied for users after a quick restart
+                        let container_padding = workspace.container_padding;
+                        let workspace_padding = workspace.workspace_padding;
 
-                            *workspace = state_workspace.clone();
+                        *workspace = state_workspace.clone();
 
-                            workspace.container_padding = container_padding;
-                            workspace.workspace_padding = workspace_padding;
+                        workspace.container_padding = container_padding;
+                        workspace.workspace_padding = workspace_padding;
 
-                            if state_monitor.focused_workspace_idx() == workspace_idx {
-                                focused_workspace = workspace_idx;
-                            }
+                        if state_monitor.focused_workspace_idx() == workspace_idx {
+                            focused_workspace = workspace_idx;
                         }
                     }
                 }
@@ -624,66 +623,61 @@ impl WindowManager {
         monitor_idx: usize,
         workspace_idx: usize,
     ) -> WindowManagementBehaviour {
-        if let Some(monitor) = self.monitors().get(monitor_idx) {
-            if let Some(workspace) = monitor.workspaces().get(workspace_idx) {
-                let current_behaviour =
-                    if let Some(behaviour) = workspace.window_container_behaviour {
-                        if workspace.containers().is_empty()
-                            && matches!(behaviour, WindowContainerBehaviour::Append)
-                        {
-                            // You can't append to an empty workspace
-                            WindowContainerBehaviour::Create
-                        } else {
-                            behaviour
-                        }
-                    } else if workspace.containers().is_empty()
-                        && matches!(
-                            self.window_management_behaviour.current_behaviour,
-                            WindowContainerBehaviour::Append
-                        )
-                    {
-                        // You can't append to an empty workspace
-                        WindowContainerBehaviour::Create
-                    } else {
-                        self.window_management_behaviour.current_behaviour
-                    };
-
-                let float_override = if let Some(float_override) = workspace.float_override {
-                    float_override
+        if let Some(monitor) = self.monitors().get(monitor_idx)
+            && let Some(workspace) = monitor.workspaces().get(workspace_idx)
+        {
+            let current_behaviour = if let Some(behaviour) = workspace.window_container_behaviour {
+                if workspace.containers().is_empty()
+                    && matches!(behaviour, WindowContainerBehaviour::Append)
+                {
+                    // You can't append to an empty workspace
+                    WindowContainerBehaviour::Create
                 } else {
-                    self.window_management_behaviour.float_override
+                    behaviour
+                }
+            } else if workspace.containers().is_empty()
+                && matches!(
+                    self.window_management_behaviour.current_behaviour,
+                    WindowContainerBehaviour::Append
+                )
+            {
+                // You can't append to an empty workspace
+                WindowContainerBehaviour::Create
+            } else {
+                self.window_management_behaviour.current_behaviour
+            };
+
+            let float_override = if let Some(float_override) = workspace.float_override {
+                float_override
+            } else {
+                self.window_management_behaviour.float_override
+            };
+
+            let floating_layer_behaviour =
+                if let Some(behaviour) = workspace.floating_layer_behaviour {
+                    behaviour
+                } else {
+                    monitor
+                        .floating_layer_behaviour
+                        .unwrap_or(self.window_management_behaviour.floating_layer_behaviour)
                 };
 
-                let floating_layer_behaviour =
-                    if let Some(behaviour) = workspace.floating_layer_behaviour {
-                        behaviour
-                    } else {
-                        monitor
-                            .floating_layer_behaviour
-                            .unwrap_or(self.window_management_behaviour.floating_layer_behaviour)
-                    };
+            // If the workspace layer is `Floating` and the floating layer behaviour should
+            // float then change floating_layer_override to true so that new windows spawn
+            // as floating
+            let floating_layer_override = matches!(workspace.layer, WorkspaceLayer::Floating)
+                && floating_layer_behaviour.should_float();
 
-                // If the workspace layer is `Floating` and the floating layer behaviour should
-                // float then change floating_layer_override to true so that new windows spawn
-                // as floating
-                let floating_layer_override = matches!(workspace.layer, WorkspaceLayer::Floating)
-                    && floating_layer_behaviour.should_float();
-
-                return WindowManagementBehaviour {
-                    current_behaviour,
-                    float_override,
-                    floating_layer_override,
-                    floating_layer_behaviour,
-                    toggle_float_placement: self.window_management_behaviour.toggle_float_placement,
-                    floating_layer_placement: self
-                        .window_management_behaviour
-                        .floating_layer_placement,
-                    float_override_placement: self
-                        .window_management_behaviour
-                        .float_override_placement,
-                    float_rule_placement: self.window_management_behaviour.float_rule_placement,
-                };
-            }
+            return WindowManagementBehaviour {
+                current_behaviour,
+                float_override,
+                floating_layer_override,
+                floating_layer_behaviour,
+                toggle_float_placement: self.window_management_behaviour.toggle_float_placement,
+                floating_layer_placement: self.window_management_behaviour.floating_layer_placement,
+                float_override_placement: self.window_management_behaviour.float_override_placement,
+                float_rule_placement: self.window_management_behaviour.float_rule_placement,
+            };
         }
 
         WindowManagementBehaviour {
@@ -1051,10 +1045,10 @@ impl WindowManager {
                 }
             }
 
-            if workspace.wallpaper.is_some() || monitor_wp.is_some() {
-                if let Err(error) = workspace.apply_wallpaper(hmonitor, &monitor_wp) {
-                    tracing::error!("failed to apply wallpaper: {}", error);
-                }
+            if (workspace.wallpaper.is_some() || monitor_wp.is_some())
+                && let Err(error) = workspace.apply_wallpaper(hmonitor, &monitor_wp)
+            {
+                tracing::error!("failed to apply wallpaper: {}", error);
             }
 
             workspace.update()?;
@@ -1083,24 +1077,22 @@ impl WindowManager {
 
         let workspace = self.focused_workspace()?;
         // first check the focused workspace
-        if let Some(container_idx) = workspace.container_idx_from_current_point() {
-            if let Some(container) = workspace.containers().get(container_idx) {
-                if let Some(window) = container.focused_window() {
-                    hwnd = Some(window.hwnd);
-                }
-            }
+        if let Some(container_idx) = workspace.container_idx_from_current_point()
+            && let Some(container) = workspace.containers().get(container_idx)
+            && let Some(window) = container.focused_window()
+        {
+            hwnd = Some(window.hwnd);
         }
 
         // then check all workspaces
         if hwnd.is_none() {
             for monitor in self.monitors() {
                 for ws in monitor.workspaces() {
-                    if let Some(container_idx) = ws.container_idx_from_current_point() {
-                        if let Some(container) = ws.containers().get(container_idx) {
-                            if let Some(window) = container.focused_window() {
-                                hwnd = Some(window.hwnd);
-                            }
-                        }
+                    if let Some(container_idx) = ws.container_idx_from_current_point()
+                        && let Some(container) = ws.containers().get(container_idx)
+                        && let Some(window) = container.focused_window()
+                    {
+                        hwnd = Some(window.hwnd);
                     }
                 }
             }
@@ -1401,10 +1393,10 @@ impl WindowManager {
                     window.focus(self.mouse_follows_focus)?;
                 }
             } else if let Some(container) = &self.focused_workspace()?.monocle_container {
-                if let Some(window) = container.focused_window() {
-                    if trigger_focus {
-                        window.focus(self.mouse_follows_focus)?;
-                    }
+                if let Some(window) = container.focused_window()
+                    && trigger_focus
+                {
+                    window.focus(self.mouse_follows_focus)?;
                 }
             } else if let Ok(window) = self.focused_window_mut() {
                 if trigger_focus {
@@ -1445,12 +1437,10 @@ impl WindowManager {
                     && self.focused_workspace()?.monocle_container.is_none()
                     // and we don't have any floating windows that should show on top
                     && self.focused_workspace()?.floating_windows().is_empty()
+                    && let Ok(window) = self.focused_window_mut()
+                        && trigger_focus
                 {
-                    if let Ok(window) = self.focused_window_mut() {
-                        if trigger_focus {
-                            window.focus(self.mouse_follows_focus)?;
-                        }
-                    }
+                    window.focus(self.mouse_follows_focus)?;
                 }
             }
         }
@@ -2187,10 +2177,10 @@ impl WindowManager {
 
         let focused_monitor_idx = self.focused_monitor_idx();
 
-        if focused_monitor_idx == monitor_idx {
-            if let Some(workspace_idx) = workspace_idx {
-                return self.move_container_to_workspace(workspace_idx, follow, None);
-            }
+        if focused_monitor_idx == monitor_idx
+            && let Some(workspace_idx) = workspace_idx
+        {
+            return self.move_container_to_workspace(workspace_idx, follow, None);
         }
 
         let offset = self.work_area_offset;
@@ -2235,11 +2225,11 @@ impl WindowManager {
             .ok_or_eyre("there is no monitor")?;
 
         let mut should_load_workspace = false;
-        if let Some(workspace_idx) = workspace_idx {
-            if workspace_idx != target_monitor.focused_workspace_idx() {
-                target_monitor.focus_workspace(workspace_idx)?;
-                should_load_workspace = true;
-            }
+        if let Some(workspace_idx) = workspace_idx
+            && workspace_idx != target_monitor.focused_workspace_idx()
+        {
+            target_monitor.focus_workspace(workspace_idx)?;
+            should_load_workspace = true;
         }
         let target_workspace = target_monitor
             .focused_workspace_mut()
@@ -2277,12 +2267,12 @@ impl WindowManager {
                 target_monitor.add_container(container, workspace_idx)?;
             }
 
-            if let Some(workspace) = target_monitor.focused_workspace() {
-                if !workspace.tile {
-                    for hwnd in container_hwnds {
-                        Window::from(hwnd)
-                            .move_to_area(&current_area, &target_monitor.work_area_size)?;
-                    }
+            if let Some(workspace) = target_monitor.focused_workspace()
+                && !workspace.tile
+            {
+                for hwnd in container_hwnds {
+                    Window::from(hwnd)
+                        .move_to_area(&current_area, &target_monitor.work_area_size)?;
                 }
             }
         } else {
@@ -2521,34 +2511,34 @@ impl WindowManager {
 
             self.focus_workspace(next_idx)?;
 
-            if let Ok(focused_workspace) = self.focused_workspace_mut() {
-                if focused_workspace.monocle_container.is_none() {
-                    match direction {
-                        OperationDirection::Left => match focused_workspace.layout {
-                            Layout::Default(layout) => {
-                                let target_index =
-                                    layout.rightmost_index(focused_workspace.containers().len());
-                                focused_workspace.focus_container(target_index);
-                            }
-                            Layout::Custom(_) => {
-                                focused_workspace.focus_container(
-                                    focused_workspace.containers().len().saturating_sub(1),
-                                );
-                            }
-                        },
-                        OperationDirection::Right => match focused_workspace.layout {
-                            Layout::Default(layout) => {
-                                let target_index =
-                                    layout.leftmost_index(focused_workspace.containers().len());
-                                focused_workspace.focus_container(target_index);
-                            }
-                            Layout::Custom(_) => {
-                                focused_workspace.focus_container(0);
-                            }
-                        },
-                        _ => {}
-                    };
-                }
+            if let Ok(focused_workspace) = self.focused_workspace_mut()
+                && focused_workspace.monocle_container.is_none()
+            {
+                match direction {
+                    OperationDirection::Left => match focused_workspace.layout {
+                        Layout::Default(layout) => {
+                            let target_index =
+                                layout.rightmost_index(focused_workspace.containers().len());
+                            focused_workspace.focus_container(target_index);
+                        }
+                        Layout::Custom(_) => {
+                            focused_workspace.focus_container(
+                                focused_workspace.containers().len().saturating_sub(1),
+                            );
+                        }
+                    },
+                    OperationDirection::Right => match focused_workspace.layout {
+                        Layout::Default(layout) => {
+                            let target_index =
+                                layout.leftmost_index(focused_workspace.containers().len());
+                            focused_workspace.focus_container(target_index);
+                        }
+                        Layout::Custom(_) => {
+                            focused_workspace.focus_container(0);
+                        }
+                    },
+                    _ => {}
+                };
             }
 
             return Ok(());
@@ -2676,34 +2666,34 @@ impl WindowManager {
 
             self.focus_workspace(next_idx)?;
 
-            if let Ok(focused_workspace) = self.focused_workspace_mut() {
-                if focused_workspace.monocle_container.is_none() {
-                    match direction {
-                        OperationDirection::Left => match focused_workspace.layout {
-                            Layout::Default(layout) => {
-                                let target_index =
-                                    layout.rightmost_index(focused_workspace.containers().len());
-                                focused_workspace.focus_container(target_index);
-                            }
-                            Layout::Custom(_) => {
-                                focused_workspace.focus_container(
-                                    focused_workspace.containers().len().saturating_sub(1),
-                                );
-                            }
-                        },
-                        OperationDirection::Right => match focused_workspace.layout {
-                            Layout::Default(layout) => {
-                                let target_index =
-                                    layout.leftmost_index(focused_workspace.containers().len());
-                                focused_workspace.focus_container(target_index);
-                            }
-                            Layout::Custom(_) => {
-                                focused_workspace.focus_container(0);
-                            }
-                        },
-                        _ => {}
-                    };
-                }
+            if let Ok(focused_workspace) = self.focused_workspace_mut()
+                && focused_workspace.monocle_container.is_none()
+            {
+                match direction {
+                    OperationDirection::Left => match focused_workspace.layout {
+                        Layout::Default(layout) => {
+                            let target_index =
+                                layout.rightmost_index(focused_workspace.containers().len());
+                            focused_workspace.focus_container(target_index);
+                        }
+                        Layout::Custom(_) => {
+                            focused_workspace.focus_container(
+                                focused_workspace.containers().len().saturating_sub(1),
+                            );
+                        }
+                    },
+                    OperationDirection::Right => match focused_workspace.layout {
+                        Layout::Default(layout) => {
+                            let target_index =
+                                layout.leftmost_index(focused_workspace.containers().len());
+                            focused_workspace.focus_container(target_index);
+                        }
+                        Layout::Custom(_) => {
+                            focused_workspace.focus_container(0);
+                        }
+                    },
+                    _ => {}
+                };
             }
 
             return Ok(());
@@ -2950,10 +2940,10 @@ impl WindowManager {
 
                     // unset monocle container on target workspace if there is one
                     let mut target_workspace_has_monocle = false;
-                    if let Ok(target_workspace) = self.focused_workspace() {
-                        if target_workspace.monocle_container.is_some() {
-                            target_workspace_has_monocle = true;
-                        }
+                    if let Ok(target_workspace) = self.focused_workspace()
+                        && target_workspace.monocle_container.is_some()
+                    {
+                        target_workspace_has_monocle = true;
                     }
 
                     if target_workspace_has_monocle {
@@ -3080,10 +3070,10 @@ impl WindowManager {
             }
         }
 
-        if let Some(idx) = target_idx {
-            if let Some(window) = focused_workspace.floating_windows().get(idx) {
-                window.focus(mouse_follows_focus)?;
-            }
+        if let Some(idx) = target_idx
+            && let Some(window) = focused_workspace.floating_windows().get(idx)
+        {
+            window.focus(mouse_follows_focus)?;
         }
 
         Ok(())
@@ -3260,10 +3250,10 @@ impl WindowManager {
         let workspace = self.focused_workspace_mut()?;
 
         let mut focused_hwnd = None;
-        if let Some(container) = workspace.focused_container() {
-            if let Some(window) = container.focused_window() {
-                focused_hwnd = Some(window.hwnd);
-            }
+        if let Some(container) = workspace.focused_container()
+            && let Some(window) = container.focused_window()
+        {
+            focused_hwnd = Some(window.hwnd);
         }
 
         workspace.focus_container(workspace.containers().len().saturating_sub(1));
@@ -3287,10 +3277,10 @@ impl WindowManager {
         let workspace = self.focused_workspace_mut()?;
 
         let mut focused_hwnd = None;
-        if let Some(container) = workspace.focused_container() {
-            if let Some(window) = container.focused_window() {
-                focused_hwnd = Some(window.hwnd);
-            }
+        if let Some(container) = workspace.focused_container()
+            && let Some(window) = container.focused_window()
+        {
+            focused_hwnd = Some(window.hwnd);
         }
 
         let initial_focused_container_index = workspace.focused_container_idx();
@@ -3359,10 +3349,10 @@ impl WindowManager {
 
             let mut target_container_is_stack = false;
 
-            if let Some(container) = workspace.containers().get(adjusted_new_index) {
-                if container.windows().len() > 1 {
-                    target_container_is_stack = true;
-                }
+            if let Some(container) = workspace.containers().get(adjusted_new_index)
+                && container.windows().len() > 1
+            {
+                target_container_is_stack = true;
             }
 
             if let Some(current) = workspace.focused_container() {
@@ -3375,12 +3365,10 @@ impl WindowManager {
                 }
             }
 
-            if changed_focus {
-                if let Some(container) = workspace.focused_container_mut() {
-                    container.load_focused_window();
-                    if let Some(window) = container.focused_window() {
-                        window.focus(self.mouse_follows_focus)?;
-                    }
+            if changed_focus && let Some(container) = workspace.focused_container_mut() {
+                container.load_focused_window();
+                if let Some(window) = container.focused_window() {
+                    window.focus(self.mouse_follows_focus)?;
                 }
             }
 
@@ -4227,10 +4215,10 @@ impl WindowManager {
 
         for (monitor_idx, monitor) in self.monitors().iter().enumerate() {
             for (workspace_idx, workspace) in monitor.workspaces().iter().enumerate() {
-                if let Some(workspace_name) = &workspace.name {
-                    if workspace_name == name {
-                        return Option::from((monitor_idx, workspace_idx));
-                    }
+                if let Some(workspace_name) = &workspace.name
+                    && workspace_name == name
+                {
+                    return Option::from((monitor_idx, workspace_idx));
                 }
             }
         }
@@ -4348,8 +4336,8 @@ impl WindowManager {
 mod tests {
     use super::*;
     use crate::monitor;
-    use crossbeam_channel::bounded;
     use crossbeam_channel::Sender;
+    use crossbeam_channel::bounded;
     use std::path::PathBuf;
     use uuid::Uuid;
 

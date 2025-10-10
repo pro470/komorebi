@@ -1,8 +1,8 @@
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use color_eyre::eyre::OptionExt;
 use color_eyre::Result;
+use color_eyre::eyre::OptionExt;
 use crossbeam_utils::atomic::AtomicConsume;
 use parking_lot::Mutex;
 
@@ -11,6 +11,18 @@ use crate::core::Rect;
 use crate::core::Sizing;
 use crate::core::WindowContainerBehaviour;
 
+use crate::CURRENT_VIRTUAL_DESKTOP;
+use crate::DefaultLayout;
+use crate::FLOATING_APPLICATIONS;
+use crate::HIDDEN_HWNDS;
+use crate::Layout;
+use crate::Notification;
+use crate::NotificationEvent;
+use crate::REGEX_IDENTIFIERS;
+use crate::State;
+use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
+use crate::VirtualDesktopNotification;
+use crate::Window;
 use crate::border_manager;
 use crate::border_manager::BORDER_OFFSET;
 use crate::border_manager::BORDER_WIDTH;
@@ -18,25 +30,13 @@ use crate::current_virtual_desktop;
 use crate::notify_subscribers;
 use crate::stackbar_manager;
 use crate::transparency_manager;
-use crate::window::should_act;
 use crate::window::RuleDebug;
+use crate::window::should_act;
 use crate::window_manager::WindowManager;
 use crate::window_manager_event::WindowManagerEvent;
 use crate::windows_api::WindowsApi;
 use crate::winevent::WinEvent;
 use crate::workspace::WorkspaceLayer;
-use crate::DefaultLayout;
-use crate::Layout;
-use crate::Notification;
-use crate::NotificationEvent;
-use crate::State;
-use crate::VirtualDesktopNotification;
-use crate::Window;
-use crate::CURRENT_VIRTUAL_DESKTOP;
-use crate::FLOATING_APPLICATIONS;
-use crate::HIDDEN_HWNDS;
-use crate::REGEX_IDENTIFIERS;
-use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
 
 #[tracing::instrument]
 pub fn listen_for_events(wm: Arc<Mutex<WindowManager>>) {
@@ -145,7 +145,9 @@ impl WindowManager {
                     // to be consumed by integrating gui applications like bars to know
                     // when to hide visual components which don't make sense when not on
                     // komorebi's associated virtual desktop
-                    tracing::debug!("notifying subscribers that we have left komorebi's associated virtual desktop");
+                    tracing::debug!(
+                        "notifying subscribers that we have left komorebi's associated virtual desktop"
+                    );
                     notify_subscribers(
                         Notification {
                             event: NotificationEvent::VirtualDesktop(
@@ -165,7 +167,9 @@ impl WindowManager {
                     // to be consumed by integrating gui applications like bars to know
                     // when to show visual components associated with komorebi's virtual
                     // desktop
-                    tracing::debug!("notifying subscribers that we are back on komorebi's associated virtual desktop");
+                    tracing::debug!(
+                        "notifying subscribers that we are back on komorebi's associated virtual desktop"
+                    );
                     notify_subscribers(
                         Notification {
                             event: NotificationEvent::VirtualDesktop(
@@ -203,12 +207,11 @@ impl WindowManager {
                     //
                     // This check ensures that we only update the focused monitor when the window
                     // triggering monitor reconciliation is known to not be tied to a specific monitor.
-                    if let Ok(class) = window.class() {
-                        if class != "OleMainThreadWndClass"
-                            && self.focused_monitor_idx() != monitor_idx
-                        {
-                            self.focus_monitor(monitor_idx)?;
-                        }
+                    if let Ok(class) = window.class()
+                        && class != "OleMainThreadWndClass"
+                        && self.focused_monitor_idx() != monitor_idx
+                    {
+                        self.focus_monitor(monitor_idx)?;
                     }
                 }
             }
@@ -326,10 +329,10 @@ impl WindowManager {
 
                 match floating_window_idx {
                     None => {
-                        if let Some(w) = &workspace.maximized_window {
-                            if w.hwnd == window.hwnd {
-                                return Ok(());
-                            }
+                        if let Some(w) = &workspace.maximized_window
+                            && w.hwnd == window.hwnd
+                        {
+                            return Ok(());
                         }
 
                         if let Some(monocle) = &workspace.monocle_container {
@@ -396,23 +399,20 @@ impl WindowManager {
                         }
                     }
 
-                    if let Some((m_idx, w_idx)) = self.known_hwnds.get(&window.hwnd) {
-                        if let Some(focused_workspace_idx) = self
+                    if let Some((m_idx, w_idx)) = self.known_hwnds.get(&window.hwnd)
+                        && let Some(focused_workspace_idx) = self
                             .monitors()
                             .get(*m_idx)
                             .map(|m| m.focused_workspace_idx())
-                        {
-                            if *m_idx != self.focused_monitor_idx()
-                                && *w_idx != focused_workspace_idx
-                            {
-                                tracing::debug!(
-                                    "ignoring show event for window already associated with another workspace"
-                                );
+                        && *m_idx != self.focused_monitor_idx()
+                        && *w_idx != focused_workspace_idx
+                    {
+                        tracing::debug!(
+                            "ignoring show event for window already associated with another workspace"
+                        );
 
-                                window.hide();
-                                proceed = false;
-                            }
-                        }
+                        window.hide();
+                        proceed = false;
                     }
 
                     if proceed {
@@ -511,12 +511,11 @@ impl WindowManager {
 
                         if workspace_contains_window {
                             let mut monocle_window_event = false;
-                            if let Some(ref monocle) = monocle_container {
-                                if let Some(monocle_window) = monocle.focused_window() {
-                                    if monocle_window.hwnd == window.hwnd {
-                                        monocle_window_event = true;
-                                    }
-                                }
+                            if let Some(ref monocle) = monocle_container
+                                && let Some(monocle_window) = monocle.focused_window()
+                                && monocle_window.hwnd == window.hwnd
+                            {
+                                monocle_window_event = true;
                             }
 
                             let workspace = self.focused_workspace()?;
@@ -551,14 +550,14 @@ impl WindowManager {
 
                 // If the window handles don't match then something went wrong and the pending move
                 // is not related to this current move, if so abort this operation.
-                if let Some((_, _, w_hwnd)) = pending {
-                    if w_hwnd != window.hwnd {
-                        color_eyre::eyre::bail!(
-                            "window handles for move operation don't match: {} != {}",
-                            w_hwnd,
-                            window.hwnd
-                        );
-                    }
+                if let Some((_, _, w_hwnd)) = pending
+                    && w_hwnd != window.hwnd
+                {
+                    color_eyre::eyre::bail!(
+                        "window handles for move operation don't match: {} != {}",
+                        w_hwnd,
+                        window.hwnd
+                    );
                 }
 
                 let target_monitor_idx = self
@@ -586,10 +585,10 @@ impl WindowManager {
                 // This will be true if we have moved to another monitor
                 let mut moved_across_monitors = false;
 
-                if let Some((m_idx, _)) = self.known_hwnds.get(&window.hwnd) {
-                    if *m_idx != target_monitor_idx {
-                        moved_across_monitors = true;
-                    }
+                if let Some((m_idx, _)) = self.known_hwnds.get(&window.hwnd)
+                    && *m_idx != target_monitor_idx
+                {
+                    moved_across_monitors = true;
                 }
 
                 if let Some((origin_monitor_idx, origin_workspace_idx, _)) = pending {
@@ -851,13 +850,12 @@ impl WindowManager {
 
                         if let Some(target_container) =
                             c_idx.and_then(|c_idx| target_workspace.containers().get(c_idx))
+                            && target_container.focused_window() != Some(&window)
                         {
-                            if target_container.focused_window() != Some(&window) {
-                                tracing::debug!(
-                                    "Needs reconciliation within a stack on the focused workspace"
-                                );
-                                needs_reconciliation = Some((*m_idx, *ws_idx));
-                            }
+                            tracing::debug!(
+                                "Needs reconciliation within a stack on the focused workspace"
+                            );
+                            needs_reconciliation = Some((*m_idx, *ws_idx));
                         }
                     }
                 }
