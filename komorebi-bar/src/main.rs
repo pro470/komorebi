@@ -114,13 +114,8 @@ fn main() -> color_eyre::Result<()> {
 
     #[cfg(feature = "schemars")]
     if opts.schema {
-        let settings = schemars::generate::SchemaSettings::default().with(|s| {
-            s.inline_subschemas = true;
-        });
-
-        let generator = settings.into_generator();
-        let socket_message = generator.into_root_schema_for::<KomobarConfig>();
-        let schema = serde_json::to_string_pretty(&socket_message)?;
+        let bar_config = schemars::schema_for!(KomobarConfig);
+        let schema = serde_json::to_string_pretty(&bar_config)?;
 
         println!("{schema}");
         std::process::exit(0);

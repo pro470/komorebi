@@ -2224,12 +2224,7 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
             SocketMessage::StaticConfigSchema => {
                 #[cfg(feature = "schemars")]
                 {
-                    let settings = schemars::generate::SchemaSettings::default().with(|s| {
-                        s.inline_subschemas = true;
-                    });
-
-                    let generator = settings.into_generator();
-                    let socket_message = generator.into_root_schema_for::<StaticConfig>();
+                    let socket_message = schemars::schema_for!(SocketMessage);
                     let schema = serde_json::to_string_pretty(&socket_message)?;
 
                     reply.write_all(schema.as_bytes())?;
