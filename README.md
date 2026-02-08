@@ -46,19 +46,18 @@ This is currently a manual process - most days this shouldn't take more than
 If you haven't had a reply to your email within 24h you can reach out to me on
 Discord.
 
+## Note: Unexpected mobile device management (MDM) detection prompts
+
+You have most likely unintentionally enrolled your device in "Bring Your Own
+Device" (BYOD) MDM. You can confirm if this is the case by running `dsregcmd
+/status` and then take the appropriate steps to remove the MDM profile and take
+back full control of your system.
+
+If you need help doing this you can ask on Discord.
+
 ## Note: komorebi for Mac
 
-If you made your way to this repo looking for [komorebi for
-Mac](https://github.com/KomoCorp/komorebi-for-mac), the project is currently
-being developed in private with [early access available to GitHub
-Sponsors](https://github.com/sponsors/LGUG2Z).
-
-If you want to see how far along development is before signing up for early
-access (spoiler: it's very far along!) there is an overview video you can watch
-[here](https://www.youtube.com/watch?v=u3eJcsa_MJk).
-
-Sponsors with early access can install komorebi for Mac either by compiling
-from source, by using Homebrew, or by using the project's Nix Flake. 
+komorebi for Mac lives [here](https://github.com/LGUG2Z/komorebi-for-mac) :)
 
 ## Overview
 

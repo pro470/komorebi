@@ -16,10 +16,12 @@ use std::time::Instant;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Update widget configuration
 pub struct UpdateConfig {
     /// Enable the Update widget
     pub enable: bool,
-    /// Data refresh interval (default: 12 hours)
+    /// Data refresh interval in hours
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 12)))]
     pub data_refresh_interval: Option<u64>,
     /// Display label prefix
     pub label_prefix: Option<LabelPrefix>,

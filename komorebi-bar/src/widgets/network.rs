@@ -26,6 +26,7 @@ use sysinfo::Networks;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Network widget configuration
 pub struct NetworkConfig {
     /// Enable the Network widget
     pub enable: bool,
@@ -40,7 +41,8 @@ pub struct NetworkConfig {
     /// Characters to reserve for received and transmitted activity
     #[serde(alias = "network_activity_fill_characters")]
     pub activity_left_padding: Option<usize>,
-    /// Data refresh interval (default: 10 seconds)
+    /// Data refresh interval in seconds
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 10)))]
     pub data_refresh_interval: Option<u64>,
     /// Display label prefix
     pub label_prefix: Option<LabelPrefix>,
@@ -50,6 +52,7 @@ pub struct NetworkConfig {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Network select configuration
 pub struct NetworkSelectConfig {
     /// Select the total received data when it's over this value
     pub total_received_over: Option<u64>,
@@ -64,7 +67,9 @@ pub struct NetworkSelectConfig {
 impl From<NetworkConfig> for Network {
     fn from(value: NetworkConfig) -> Self {
         let default_refresh_interval = 10;
-        let data_refresh_interval = value.data_refresh_interval.unwrap_or(10);
+        let data_refresh_interval = value
+            .data_refresh_interval
+            .unwrap_or(default_refresh_interval);
 
         Self {
             enable: value.enable,

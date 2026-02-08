@@ -19,12 +19,14 @@ use std::time::Instant;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Battery widget configuration
 pub struct BatteryConfig {
     /// Enable the Battery widget
     pub enable: bool,
     /// Hide the widget if the battery is at full charge
     pub hide_on_full_charge: Option<bool>,
-    /// Data refresh interval (default: 10 seconds)
+    /// Data refresh interval in seconds
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 10)))]
     pub data_refresh_interval: Option<u64>,
     /// Display label prefix
     pub label_prefix: Option<LabelPrefix>,

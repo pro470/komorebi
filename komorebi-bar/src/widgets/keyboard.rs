@@ -21,15 +21,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
-const DEFAULT_DATA_REFRESH_INTERVAL: u64 = 1;
 const ERROR_TEXT: &str = "Error";
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Keyboard widget configuration
 pub struct KeyboardConfig {
     /// Enable the Input widget
     pub enable: bool,
-    /// Data refresh interval (default: 1 second)
+    /// Data refresh interval
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 10)))]
     pub data_refresh_interval: Option<u64>,
     /// Display label prefix
     pub label_prefix: Option<LabelPrefix>,
@@ -37,9 +38,7 @@ pub struct KeyboardConfig {
 
 impl From<KeyboardConfig> for Keyboard {
     fn from(value: KeyboardConfig) -> Self {
-        let data_refresh_interval = value
-            .data_refresh_interval
-            .unwrap_or(DEFAULT_DATA_REFRESH_INTERVAL);
+        let data_refresh_interval = value.data_refresh_interval.unwrap_or(10);
 
         Self {
             enable: value.enable,

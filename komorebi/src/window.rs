@@ -302,10 +302,13 @@ impl RenderDispatcher for TransparencyRenderDispatcher {
 #[derive(Copy, Clone, Debug, Display, EnumString, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Aspect ratio for temporarily floating windows
 pub enum AspectRatio {
-    /// A predefined aspect ratio
+    /// Predefined aspect ratio
+    #[cfg_attr(feature = "schemars", schemars(title = "Predefined"))]
     Predefined(PredefinedAspectRatio),
-    /// A custom W:H aspect ratio
+    /// Custom W:H aspect ratio
+    #[cfg_attr(feature = "schemars", schemars(title = "Custom"))]
     Custom(i32, i32),
 }
 
@@ -317,6 +320,7 @@ impl Default for AspectRatio {
 
 #[derive(Copy, Clone, Debug, Default, Display, EnumString, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Predefined aspect ratio
 pub enum PredefinedAspectRatio {
     /// 21:9
     Ultrawide,

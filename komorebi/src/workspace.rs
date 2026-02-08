@@ -1,5 +1,3 @@
-#![allow(unused_assignments, unused_variables)] // TODO: something got weird in clippy 1.92.0
-
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fmt::Display;
@@ -27,9 +25,9 @@ use crate::core::CustomLayout;
 use crate::core::CycleDirection;
 use crate::core::DefaultLayout;
 use crate::core::Layout;
+use crate::core::LayoutOptions;
 use crate::core::OperationDirection;
 use crate::core::Rect;
-use crate::default_layout::LayoutOptions;
 use crate::lockable_sequence::LockableSequence;
 use crate::ring::Ring;
 use crate::should_act;
@@ -42,6 +40,7 @@ use crate::windows_api::WindowsApi;
 use color_eyre::eyre;
 use color_eyre::eyre::OptionExt;
 use komorebi_themes::Base16ColourPalette;
+use komorebi_themes::KomorebiThemeCustom as Custom;
 use serde::Deserialize;
 use serde::Serialize;
 use uds_windows::UnixStream;
@@ -243,6 +242,12 @@ impl Workspace {
         self.wallpaper = config.wallpaper.clone();
         self.layout_options = config.layout_options;
 
+        tracing::debug!(
+            "Workspace '{}' loaded layout_options: {:?}",
+            self.name.as_deref().unwrap_or("unnamed"),
+            self.layout_options
+        );
+
         self.workspace_config = Some(config.clone());
 
         Ok(())
@@ -336,7 +341,7 @@ impl Workspace {
                 }
 
                 if let Some(palette) = base16_palette {
-                    let komorebi_theme = KomorebiTheme::Custom {
+                    let komorebi_theme = KomorebiTheme::Custom(Custom {
                         colours: Box::new(palette),
                         single_border: wallpaper
                             .theme_options
@@ -375,7 +380,7 @@ impl Workspace {
                             .as_ref()
                             .and_then(|o| o.stackbar_background),
                         bar_accent: wallpaper.theme_options.as_ref().and_then(|o| o.bar_accent),
-                    };
+                    });
 
                     let bytes = SocketMessage::Theme(Box::new(komorebi_theme)).as_bytes()?;
 
@@ -551,6 +556,11 @@ impl Workspace {
             } else if let Some(window) = &mut self.maximized_window {
                 window.maximize();
             } else if !self.containers().is_empty() {
+                tracing::debug!(
+                    "Workspace '{}' update() - self.layout_options before calculate: {:?}",
+                    self.name.as_deref().unwrap_or("unnamed"),
+                    self.layout_options
+                );
                 let mut layouts = self.layout.as_boxed_arrangement().calculate(
                     &adjusted_work_area,
                     NonZeroUsize::new(self.containers().len()).ok_or_eyre(
@@ -1272,7 +1282,7 @@ impl Workspace {
             0 | 1 => self.enforce_no_resize(),
             _ => {
                 // Zero is actually on the left
-                if let Some(mut left) = resize_dimensions[0] {
+                if let Some(left) = resize_dimensions[0].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.left = 0;
@@ -1305,7 +1315,7 @@ impl Workspace {
             0 | 1 => self.enforce_no_resize(),
             _ => {
                 // Zero is actually on the right
-                if let Some(mut left) = resize_dimensions[1] {
+                if let Some(left) = resize_dimensions[1].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.right = 0;
@@ -1336,7 +1346,7 @@ impl Workspace {
         match resize_dimensions.len() {
             0 | 1 => self.enforce_no_resize(),
             _ => {
-                if let Some(mut left) = resize_dimensions[0] {
+                if let Some(left) = resize_dimensions[0].as_mut() {
                     left.top = 0;
                     left.left = 0;
                     left.right = 0;
@@ -1367,14 +1377,14 @@ impl Workspace {
             // Two windows can only be resized in the middle
             2 => {
                 // Zero is actually on the right
-                if let Some(mut right) = resize_dimensions[0] {
+                if let Some(right) = resize_dimensions[0].as_mut() {
                     right.top = 0;
                     right.bottom = 0;
                     right.right = 0;
                 }
 
                 // One is on the left
-                if let Some(mut left) = resize_dimensions[1] {
+                if let Some(left) = resize_dimensions[1].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.left = 0;
@@ -1384,13 +1394,13 @@ impl Workspace {
             // stack on the right
             _ => {
                 // Central can be resized left or right
-                if let Some(mut right) = resize_dimensions[0] {
+                if let Some(right) = resize_dimensions[0].as_mut() {
                     right.top = 0;
                     right.bottom = 0;
                 }
 
                 // Left one can only be resized to the right
-                if let Some(mut left) = resize_dimensions[1] {
+                if let Some(left) = resize_dimensions[1].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.left = 0;

@@ -60,9 +60,11 @@ use crate::core::Axis;
 use crate::core::BorderImplementation;
 use crate::core::FocusFollowsMouseImplementation;
 use crate::core::Layout;
+use crate::core::LayoutOptions;
 use crate::core::MoveBehaviour;
 use crate::core::OperationDirection;
 use crate::core::Rect;
+use crate::core::ScrollingLayoutOptions;
 use crate::core::Sizing;
 use crate::core::SocketMessage;
 use crate::core::StateQuery;
@@ -72,8 +74,6 @@ use crate::core::config_generation::IdWithIdentifier;
 use crate::core::config_generation::MatchingRule;
 use crate::core::config_generation::MatchingStrategy;
 use crate::current_virtual_desktop;
-use crate::default_layout::LayoutOptions;
-use crate::default_layout::ScrollingLayoutOptions;
 use crate::monitor::MonitorInformation;
 use crate::notify_subscribers;
 use crate::stackbar_manager;
@@ -947,6 +947,8 @@ impl WindowManager {
                             center_focused_column: Default::default(),
                         }),
                         grid: None,
+                        column_ratios: None,
+                        row_ratios: None,
                     },
                 };
 

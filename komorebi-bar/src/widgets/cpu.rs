@@ -18,10 +18,12 @@ use sysinfo::System;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// CPU widget configuration
 pub struct CpuConfig {
     /// Enable the Cpu widget
     pub enable: bool,
-    /// Data refresh interval (default: 10 seconds)
+    /// Data refresh interval in seconds
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 10)))]
     pub data_refresh_interval: Option<u64>,
     /// Display label prefix
     pub label_prefix: Option<LabelPrefix>,

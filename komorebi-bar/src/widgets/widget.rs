@@ -34,18 +34,43 @@ pub trait BarWidget {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Widget configuration
 pub enum WidgetConfig {
+    /// Applications widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Applications"))]
     Applications(ApplicationsConfig),
+    /// Battery widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Battery"))]
     Battery(BatteryConfig),
+    /// CPU widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Cpu"))]
     Cpu(CpuConfig),
+    /// Date widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Date"))]
     Date(DateConfig),
+    /// Keyboard widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Keyboard"))]
     Keyboard(KeyboardConfig),
+    /// Komorebi widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Komorebi"))]
     Komorebi(KomorebiConfig),
+    /// Media widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Media"))]
     Media(MediaConfig),
+    /// Memory widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Memory"))]
     Memory(MemoryConfig),
+    /// Network widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Network"))]
     Network(NetworkConfig),
+    /// Storage widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Storage"))]
     Storage(StorageConfig),
+    /// Time widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Time"))]
     Time(TimeConfig),
+    /// Update widget configuration
+    #[cfg_attr(feature = "schemars", schemars(title = "Update"))]
     Update(UpdateConfig),
 }
 

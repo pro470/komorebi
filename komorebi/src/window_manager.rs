@@ -28,6 +28,7 @@ use crate::animation::AnimationEngine;
 use crate::core::Arrangement;
 use crate::core::Axis;
 use crate::core::BorderImplementation;
+use crate::core::CustomLayout;
 use crate::core::CycleDirection;
 use crate::core::DefaultLayout;
 use crate::core::FocusFollowsMouseImplementation;
@@ -40,7 +41,6 @@ use crate::core::Sizing;
 use crate::core::WindowContainerBehaviour;
 use crate::core::WindowManagementBehaviour;
 use crate::core::config_generation::MatchingRule;
-use crate::core::custom_layout::CustomLayout;
 
 use crate::CrossBoundaryBehaviour;
 use crate::DATA_DIR;
@@ -243,14 +243,16 @@ impl WindowManager {
                     if let Some(state_monitor) = state.monitors.elements().get(monitor_idx)
                         && let Some(state_workspace) = state_monitor.workspaces().get(workspace_idx)
                     {
-                        // to make sure padding changes get applied for users after a quick restart
+                        // to make sure padding and layout_options changes get applied for users after a quick restart
                         let container_padding = workspace.container_padding;
                         let workspace_padding = workspace.workspace_padding;
+                        let layout_options = workspace.layout_options;
 
                         *workspace = state_workspace.clone();
 
                         workspace.container_padding = container_padding;
                         workspace.workspace_padding = workspace_padding;
+                        workspace.layout_options = layout_options;
 
                         if state_monitor.focused_workspace_idx() == workspace_idx {
                             focused_workspace = workspace_idx;

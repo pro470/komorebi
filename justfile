@@ -75,23 +75,38 @@ trace target $RUST_LOG="trace":
 deadlock $RUST_LOG="trace":
     cargo +stable run --bin komorebi --locked --no-default-features --features deadlock_detection
 
-docgen:
-    cargo run --package komorebic -- docgen
-    Get-ChildItem -Path "docs/cli" -Recurse -File | ForEach-Object { (Get-Content $_.FullName) -replace 'Usage: ', 'Usage: komorebic.exe ' | Set-Content $_.FullName }
+docgen starlight:
+    rm {{ starlight }}/src/data/cli/windows/*.md
+    cargo run --package komorebic -- docgen --output {{ starlight }}/src/data/cli/windows
+    schemars-docgen ./schema.json --output {{ starlight }}/src/content/docs/reference/komorebi-windows.mdx --title "komorebi.json (Windows)" --description "komorebi for Windows configuration schema reference"
+    schemars-docgen ./schema.bar.json --output {{ starlight }}/src/content/docs/reference/bar-windows.mdx --title "komorebi.bar.json (Windows)" --description "komorebi-bar for Windows configuration schema reference"
 
 jsonschema:
     cargo run --package komorebic -- static-config-schema > schema.json
     cargo run --package komorebic -- application-specific-configuration-schema > schema.asc.json
     cargo run --package komorebi-bar -- --schema > schema.bar.json
 
-# this part is run in a nix shell because python is a nightmare
-schemagen:
-    rm -rf static-config-docs bar-config-docs
-    mkdir -p static-config-docs bar-config-docs
-    generate-schema-doc ./schema.json --config template_name=js_offline --config minify=false ./static-config-docs/
-    generate-schema-doc ./schema.bar.json --config template_name=js_offline --config minify=false ./bar-config-docs/
-    mv ./bar-config-docs/schema.bar.html ./bar-config-docs/schema.html
+version := `cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "komorebi") | .version'`
+
+schemapub:
+    rm -Force komorebi-schema
+    mkdir -Force komorebi-schema
+    cp schema.json komorebi-schema/komorebi.{{ version }}.schema.json
+    cp schema.bar.json komorebi-schema/komorebi.bar.{{ version }}.schema.json
+    npx wrangler pages deploy --project-name komorebi --branch main .\komorebi-schema
+
+depcheck:
+    cargo outdated --depth 2
+    cargo +nightly udeps --quiet
+
+deps:
+    cargo update
+    just depgen
 
 depgen:
     cargo deny check
     cargo deny list --format json | jq 'del(.unlicensed)' > dependencies.json
+
+procdump:
+    cargo build --bin komorebi
+    .\procdump.exe -ma -e -x . .\target\debug\komorebi.exe

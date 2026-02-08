@@ -5,7 +5,6 @@ use crate::widgets::widget::WidgetConfig;
 use eframe::egui::Pos2;
 use eframe::egui::TextBuffer;
 use eframe::egui::Vec2;
-use komorebi_client::KomorebiTheme;
 use komorebi_client::PathExt;
 use komorebi_client::Rect;
 use komorebi_client::SocketMessage;
@@ -18,7 +17,8 @@ use std::path::PathBuf;
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// The `komorebi.bar.json` configuration file reference for `v0.1.40`
 pub struct KomobarConfig {
-    /// Bar height (default: 50)
+    /// Bar height
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 50)))]
     pub height: Option<f32>,
     /// Bar padding. Use one value for all sides or use a grouped padding for horizontal and/or
     /// vertical definition which can each take a single value for a symmetric padding or two
@@ -76,20 +76,26 @@ pub struct KomobarConfig {
     /// Frame options (see: https://docs.rs/egui/latest/egui/containers/frame/struct.Frame.html)
     pub frame: Option<FrameConfig>,
     /// The monitor index or the full monitor options
-    pub monitor: MonitorConfigOrIndex,
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = MonitorConfigOrIndex::Index(0))))]
+    pub monitor: Option<MonitorConfigOrIndex>,
     /// Font family
     pub font_family: Option<String>,
-    /// Font size (default: 12.5)
+    /// Font size
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 12.5)))]
     pub font_size: Option<f32>,
-    /// Scale of the icons relative to the font_size [[1.0-2.0]]. (default: 1.4)
+    /// Scale of the icons relative to the font_size [[1.0-2.0]]
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 1.4)))]
     pub icon_scale: Option<f32>,
-    /// Max label width before text truncation (default: 400.0)
+    /// Max label width before text truncation
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 400.0)))]
     pub max_label_width: Option<f32>,
     /// Theme
     pub theme: Option<KomobarTheme>,
-    /// Alpha value for the color transparency [[0-255]] (default: 200)
+    /// Alpha value for the color transparency [[0-255]]
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 200)))]
     pub transparency_alpha: Option<u8>,
-    /// Spacing between widgets (default: 10.0)
+    /// Spacing between widgets
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 10.0)))]
     pub widget_spacing: Option<f32>,
     /// Visual grouping for widgets
     pub grouping: Option<Grouping>,
@@ -145,6 +151,7 @@ impl KomobarConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Position configuration
 pub struct PositionConfig {
     /// The desired starting position of the bar (0,0 = top left of the screen)
     #[serde(alias = "position")]
@@ -156,6 +163,7 @@ pub struct PositionConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Frame configuration
 pub struct FrameConfig {
     /// Margin inside the painted frame
     pub inner_margin: Position,
@@ -164,6 +172,7 @@ pub struct FrameConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Monitor configuration or monitor index
 pub enum MonitorConfigOrIndex {
     /// The monitor index where you want the bar to show
     Index(usize),
@@ -173,6 +182,7 @@ pub enum MonitorConfigOrIndex {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Monitor configuration
 pub struct MonitorConfig {
     /// Komorebi monitor index of the monitor on which to render the bar
     pub index: usize,
@@ -190,9 +200,13 @@ pub type Margin = SpacingKind;
 // `Grouped` needs to come last, otherwise serde might mistaken an `IndividualSpacingConfig` for a
 // `GroupedSpacingConfig` with both `vertical` and `horizontal` set to `None` ignoring the
 // individual values.
+/// Spacing kind
 pub enum SpacingKind {
+    /// Spacing applied to all sides
     All(f32),
+    /// Individual spacing applied to each side
     Individual(IndividualSpacingConfig),
+    /// Grouped vertical and horizontal spacing
     Grouped(GroupedSpacingConfig),
 }
 
@@ -237,25 +251,36 @@ impl SpacingKind {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Grouped vertical and horizontal spacing
 pub struct GroupedSpacingConfig {
+    /// Vertical grouped spacing
     pub vertical: Option<GroupedSpacingOptions>,
+    /// Horizontal grouped spacing
     pub horizontal: Option<GroupedSpacingOptions>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Grouped spacing options
 pub enum GroupedSpacingOptions {
+    /// Symmetrical grouped spacing
     Symmetrical(f32),
+    /// Split grouped spacing
     Split(f32, f32),
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Individual spacing configuration
 pub struct IndividualSpacingConfig {
+    /// Spacing for the top
     pub top: f32,
+    /// Spacing for the bottom
     pub bottom: f32,
+    /// Spacing for the left
     pub left: f32,
+    /// Spacing for the right
     pub right: f32,
 }
 
@@ -335,6 +360,7 @@ pub fn get_individual_spacing(
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Mouse message
 pub enum MouseMessage {
     /// Send a message to the komorebi client.
     /// By default, a batch of messages are sent in the following order:
@@ -379,10 +405,13 @@ pub enum MouseMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Komorebi socket mouse message
 pub struct KomorebiMouseMessage {
-    /// Send the FocusMonitorAtCursor message (default:true)
+    /// Send the FocusMonitorAtCursor message
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = true)))]
     pub focus_monitor_at_cursor: Option<bool>,
-    /// Wrap the {message} with a MouseFollowsFocus(false) and MouseFollowsFocus({original.value}) message (default:true)
+    /// Wrap the {message} with a MouseFollowsFocus(false) and MouseFollowsFocus({original.value}) message
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = true)))]
     pub ignore_mouse_follows_focus: Option<bool>,
     /// The message to send to the komorebi client
     pub message: komorebi_client::SocketMessage,
@@ -390,6 +419,7 @@ pub struct KomorebiMouseMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Mouse configuration
 pub struct MouseConfig {
     /// Command to send on primary/left double button click
     pub on_primary_double_click: Option<MouseMessage>,
@@ -402,14 +432,16 @@ pub struct MouseConfig {
     /// Command to send on extra2/forward button click
     pub on_extra2_click: Option<MouseMessage>,
 
-    /// Defines how many points a user needs to scroll vertically to make a "tick" on a mouse/touchpad/touchscreen (default: 30)
+    /// Defines how many points a user needs to scroll vertically to make a "tick" on a mouse/touchpad/touchscreen
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 30.0)))]
     pub vertical_scroll_threshold: Option<f32>,
     /// Command to send on scrolling up (every tick)
     pub on_scroll_up: Option<MouseMessage>,
     /// Command to send on scrolling down (every tick)
     pub on_scroll_down: Option<MouseMessage>,
 
-    /// Defines how many points a user needs to scroll horizontally to make a "tick" on a mouse/touchpad/touchscreen (default: 30)
+    /// Defines how many points a user needs to scroll horizontally to make a "tick" on a mouse/touchpad/touchscreen
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 30.0)))]
     pub horizontal_scroll_threshold: Option<f32>,
     /// Command to send on scrolling left (every tick)
     pub on_scroll_left: Option<MouseMessage>,
@@ -495,6 +527,7 @@ impl KomobarConfig {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Position
 pub struct Position {
     /// X coordinate
     pub x: f32,
@@ -520,71 +553,11 @@ impl From<Position> for Pos2 {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[serde(tag = "palette")]
-pub enum KomobarTheme {
-    /// A theme from catppuccin-egui
-    Catppuccin {
-        /// Name of the Catppuccin theme (theme previews: https://github.com/catppuccin/catppuccin)
-        name: komorebi_themes::Catppuccin,
-        accent: Option<komorebi_themes::CatppuccinValue>,
-        auto_select_fill: Option<komorebi_themes::CatppuccinValue>,
-        auto_select_text: Option<komorebi_themes::CatppuccinValue>,
-    },
-    /// A theme from base16-egui-themes
-    Base16 {
-        /// Name of the Base16 theme (theme previews: https://tinted-theming.github.io/tinted-gallery/)
-        name: komorebi_themes::Base16,
-        accent: Option<komorebi_themes::Base16Value>,
-        auto_select_fill: Option<komorebi_themes::Base16Value>,
-        auto_select_text: Option<komorebi_themes::Base16Value>,
-    },
-    /// A custom Base16 theme
-    Custom {
-        /// Colours of the custom Base16 theme palette
-        colours: Box<komorebi_themes::Base16ColourPalette>,
-        accent: Option<komorebi_themes::Base16Value>,
-        auto_select_fill: Option<komorebi_themes::Base16Value>,
-        auto_select_text: Option<komorebi_themes::Base16Value>,
-    },
-}
-
-impl From<KomorebiTheme> for KomobarTheme {
-    fn from(value: KomorebiTheme) -> Self {
-        match value {
-            KomorebiTheme::Catppuccin {
-                name, bar_accent, ..
-            } => Self::Catppuccin {
-                name,
-                accent: bar_accent,
-                auto_select_fill: None,
-                auto_select_text: None,
-            },
-            KomorebiTheme::Base16 {
-                name, bar_accent, ..
-            } => Self::Base16 {
-                name,
-                accent: bar_accent,
-                auto_select_fill: None,
-                auto_select_text: None,
-            },
-            KomorebiTheme::Custom {
-                colours,
-                bar_accent,
-                ..
-            } => Self::Custom {
-                colours,
-                accent: bar_accent,
-                auto_select_fill: None,
-                auto_select_text: None,
-            },
-        }
-    }
-}
+pub use komorebi_themes::KomobarTheme;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Label prefix
 pub enum LabelPrefix {
     /// Show no prefix
     None,
@@ -598,6 +571,7 @@ pub enum LabelPrefix {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Display format
 pub enum DisplayFormat {
     /// Show only icon
     Icon,
@@ -612,9 +586,10 @@ pub enum DisplayFormat {
 }
 
 macro_rules! extend_enum {
-    ($existing_enum:ident, $new_enum:ident, { $($(#[$meta:meta])* $variant:ident),* $(,)? }) => {
+    ($(#[$type_meta:meta])* $existing_enum:ident, $new_enum:ident, { $($(#[$meta:meta])* $variant:ident),* $(,)? }) => {
         #[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
         #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+        $(#[$type_meta])*
         pub enum $new_enum {
             // Add new variants
             $(
@@ -635,7 +610,9 @@ macro_rules! extend_enum {
     };
 }
 
-extend_enum!(DisplayFormat, WorkspacesDisplayFormat, {
+extend_enum!(
+    /// Workspaces display format
+    DisplayFormat, WorkspacesDisplayFormat, {
     /// Show all icons only
     AllIcons,
     /// Show both all icons and text

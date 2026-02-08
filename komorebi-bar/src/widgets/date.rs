@@ -62,6 +62,7 @@ impl CustomModifiers {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Date widget configuration
 pub struct DateConfig {
     /// Enable the Date widget
     pub enable: bool,
@@ -104,6 +105,7 @@ impl From<DateConfig> for Date {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Date widget format
 pub enum DateFormat {
     /// Month/Date/Year format (09/08/24)
     MonthDateYear,
@@ -114,8 +116,10 @@ pub enum DateFormat {
     /// Day Date Month Year format (8 September 2024)
     DayDateMonthYear,
     /// Custom format (https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
+    #[cfg_attr(feature = "schemars", schemars(title = "Custom"))]
     Custom(String),
     /// Custom format with modifiers
+    #[cfg_attr(feature = "schemars", schemars(title = "CustomModifiers"))]
     CustomModifiers(CustomModifiers),
 }
 
