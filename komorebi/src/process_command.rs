@@ -957,6 +957,29 @@ impl WindowManager {
             }
             SocketMessage::ChangeLayout(layout) => self.change_workspace_layout_default(layout)?,
             SocketMessage::CycleLayout(direction) => self.cycle_layout(direction)?,
+            SocketMessage::LayoutRatios(ref columns, ref rows) => {
+                use crate::core::validate_ratios;
+
+                let focused_workspace = self.focused_workspace_mut()?;
+
+                let mut options = focused_workspace.layout_options.unwrap_or(LayoutOptions {
+                    scrolling: None,
+                    grid: None,
+                    column_ratios: None,
+                    row_ratios: None,
+                });
+
+                if let Some(cols) = columns {
+                    options.column_ratios = Some(validate_ratios(cols));
+                }
+
+                if let Some(rws) = rows {
+                    options.row_ratios = Some(validate_ratios(rws));
+                }
+
+                focused_workspace.layout_options = Some(options);
+                self.update_focused_workspace(false, false)?;
+            }
             SocketMessage::ChangeLayoutCustom(ref path) => {
                 self.change_workspace_custom_layout(path)?;
             }
@@ -2272,6 +2295,9 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
             }
             SocketMessage::Theme(ref theme) => {
                 theme_manager::send_notification(*theme.clone());
+            }
+            SocketMessage::ApplyState(ref state) => {
+                self.apply_state(state.clone());
             }
             // Deprecated commands
             SocketMessage::AltFocusHack(_)

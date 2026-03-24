@@ -223,6 +223,9 @@ pub struct WorkspaceConfig {
     /// Layout rules in the format of threshold => layout
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout_rules: Option<HashMap<usize, DefaultLayout>>,
+    /// Work area offset rules in the format of threshold => Rect (default: None)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_area_offset_rules: Option<HashMap<usize, Rect>>,
     /// END OF LIFE FEATURE: Custom layout rules
     #[deprecated(note = "End of life feature")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -286,6 +289,13 @@ impl From<&Workspace> for WorkspaceConfig {
             }
         }
         let layout_rules = (!layout_rules.is_empty()).then_some(layout_rules);
+
+        let mut work_area_offset_rules = HashMap::new();
+        for (threshold, offset) in &value.work_area_offset_rules {
+            work_area_offset_rules.insert(*threshold, *offset);
+        }
+        let work_area_offset_rules =
+            (!work_area_offset_rules.is_empty()).then_some(work_area_offset_rules);
 
         let mut window_container_behaviour_rules = HashMap::new();
         for (threshold, behaviour) in value.window_container_behaviour_rules.iter().flatten() {
@@ -353,6 +363,7 @@ impl From<&Workspace> for WorkspaceConfig {
                 .workspace_config
                 .as_ref()
                 .and_then(|c| c.workspace_rules.clone()),
+            work_area_offset_rules,
             work_area_offset: value.work_area_offset,
             apply_window_based_work_area_offset: Some(value.apply_window_based_work_area_offset),
             window_container_behaviour: value.window_container_behaviour,
@@ -451,7 +462,7 @@ pub enum AppSpecificConfigurationPath {
 #[serde_with::serde_as]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-/// The `komorebi.json` static configuration file reference for `v0.1.40`
+/// The `komorebi.json` static configuration file reference for `v0.1.41`
 pub struct StaticConfig {
     /// DEPRECATED from v0.1.22: no longer required
     #[deprecated(note = "No longer required")]
@@ -1919,7 +1930,7 @@ mod tests {
         let docs = vec![
             "0.1.20", "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25", "0.1.26", "0.1.27",
             "0.1.28", "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34", "0.1.35",
-            "0.1.36", "0.1.37", "0.1.38",
+            "0.1.36", "0.1.37", "0.1.38", "0.1.39",
         ];
 
         let mut versions = vec![];

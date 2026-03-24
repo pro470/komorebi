@@ -15,6 +15,7 @@ use strum::EnumString;
 
 use crate::KomorebiTheme;
 use crate::animation::prefix::AnimationPrefix;
+use crate::state::State;
 
 // Re-export everything from komorebi-layouts
 pub use komorebi_layouts::Arrangement;
@@ -39,6 +40,7 @@ pub use komorebi_layouts::OperationDirection;
 pub use komorebi_layouts::Rect;
 pub use komorebi_layouts::ScrollingLayoutOptions;
 pub use komorebi_layouts::Sizing;
+pub use komorebi_layouts::validate_ratios;
 
 // Local modules and exports
 pub use animation::AnimationStyle;
@@ -118,6 +120,7 @@ pub enum SocketMessage {
     AdjustWorkspacePadding(Sizing, i32),
     ChangeLayout(DefaultLayout),
     CycleLayout(CycleDirection),
+    LayoutRatios(Option<Vec<f32>>, Option<Vec<f32>>),
     ScrollingLayoutColumns(NonZeroUsize),
     ChangeLayoutCustom(#[serde_as(as = "ResolvedPathBuf")] PathBuf),
     FlipLayout(Axis),
@@ -254,6 +257,8 @@ pub enum SocketMessage {
     StaticConfigSchema,
     GenerateStaticConfig,
     DebugWindow(isize),
+    // low level commands
+    ApplyState(State),
 }
 
 impl SocketMessage {

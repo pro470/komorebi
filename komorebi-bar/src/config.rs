@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-/// The `komorebi.bar.json` configuration file reference for `v0.1.40`
+/// The `komorebi.bar.json` configuration file reference for `v0.1.41`
 pub struct KomobarConfig {
     /// Bar height
     #[cfg_attr(feature = "schemars", schemars(extend("default" = 50)))]
@@ -620,6 +620,26 @@ extend_enum!(
     /// Show all icons and text for the selected element, and all icons on the rest
     AllIconsAndTextOnSelected,
 });
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Media widget display format
+pub enum MediaDisplayFormat {
+    /// Show only the media info icon
+    Icon,
+    /// Show only the media info text (artist - title)
+    Text,
+    /// Show both icon and text
+    IconAndText,
+    /// Show only the control buttons (previous, play/pause, next)
+    ControlsOnly,
+    /// Show icon with control buttons
+    IconAndControls,
+    /// Show text with control buttons
+    TextAndControls,
+    /// Show icon, text, and control buttons
+    Full,
+}
 
 #[cfg(test)]
 mod tests {

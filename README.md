@@ -79,7 +79,7 @@ Please refer to the [documentation](https://lgug2z.github.io/komorebi) for instr
 to [install](https://lgug2z.github.io/komorebi/installation.html) and
 [configure](https://lgug2z.github.io/komorebi/example-configurations.html)
 _komorebi_, [common workflows](https://lgug2z.github.io/komorebi/common-workflows/komorebi-config-home.html), a complete
-[configuration schema reference](https://komorebi.lgug2z.com/schema) and a
+[configuration schema reference](https://komorebi-starlight.lgug2z.workers.dev/reference/komorebi-windows/) and a
 complete [CLI reference](https://lgug2z.github.io/komorebi/cli/quickstart.html).
 
 ## Community
@@ -424,7 +424,7 @@ every `WindowManagerEvent` and `SocketMessage` handled by `komorebi` in a Rust c
 Below is a simple example of how to use `komorebi-client` in a basic Rust application.
 
 ```rust
-// komorebi-client = { git = "https://github.com/LGUG2Z/komorebi", tag = "v0.1.39"}
+// komorebi-client = { git = "https://github.com/LGUG2Z/komorebi" }
 
 use anyhow::Result;
 use komorebi_client::Notification;
