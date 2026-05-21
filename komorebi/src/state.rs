@@ -13,6 +13,7 @@ use crate::IGNORE_IDENTIFIERS;
 use crate::LAYERED_WHITELIST;
 use crate::MANAGE_IDENTIFIERS;
 use crate::MONITOR_INDEX_PREFERENCES;
+use crate::MonocleFocusBehaviour;
 use crate::MoveBehaviour;
 use crate::OBJECT_NAME_CHANGE_ON_LAUNCH;
 use crate::OperationBehaviour;
@@ -61,6 +62,7 @@ pub struct State {
     pub new_window_behaviour: WindowContainerBehaviour,
     pub float_override: bool,
     pub cross_monitor_move_behaviour: MoveBehaviour,
+    pub monocle_focus_behaviour: MonocleFocusBehaviour,
     pub unmanaged_window_operation_behaviour: OperationBehaviour,
     pub work_area_offset: Option<Rect>,
     pub focus_follows_mouse: Option<FocusFollowsMouseImplementation>,
@@ -90,6 +92,10 @@ impl State {
         }
 
         if self.cross_monitor_move_behaviour != new.cross_monitor_move_behaviour {
+            return true;
+        }
+
+        if self.monocle_focus_behaviour != new.monocle_focus_behaviour {
             return true;
         }
 
@@ -253,6 +259,8 @@ impl From<&WindowManager> for State {
                             layout: workspace.layout.clone(),
                             layout_options: workspace.layout_options,
                             layout_rules: workspace.layout_rules.clone(),
+                            layout_options_rules: workspace.layout_options_rules.clone(),
+                            layout_defaults_cache: workspace.layout_defaults_cache.clone(),
                             work_area_offset_rules: workspace.work_area_offset_rules.clone(),
                             layout_flip: workspace.layout_flip,
                             workspace_padding: workspace.workspace_padding,
@@ -299,6 +307,7 @@ impl From<&WindowManager> for State {
             new_window_behaviour: wm.window_management_behaviour.current_behaviour,
             float_override: wm.window_management_behaviour.float_override,
             cross_monitor_move_behaviour: wm.cross_monitor_move_behaviour,
+            monocle_focus_behaviour: wm.monocle_focus_behaviour,
             focus_follows_mouse: wm.focus_follows_mouse,
             mouse_follows_focus: wm.mouse_follows_focus,
             has_pending_raise_op: wm.has_pending_raise_op,
