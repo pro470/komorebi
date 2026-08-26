@@ -768,9 +768,7 @@ impl WindowManager {
 
             // Reset any resize adjustments if we want to force a retile
             if !preserve_resize_dimensions {
-                for resize in &mut workspace.resize_dimensions {
-                    *resize = None;
-                }
+                workspace.resize_dimensions.fill(None);
             }
 
             if (workspace.wallpaper.is_some() || monitor_wp.is_some())
@@ -1954,8 +1952,11 @@ impl WindowManager {
                 match direction {
                     OperationDirection::Left => match focused_workspace.layout {
                         Layout::Default(layout) => {
-                            let target_index =
-                                layout.rightmost_index(focused_workspace.containers().len());
+                            let target_index = direction.cross_boundary_edge_index(
+                                layout,
+                                focused_workspace.containers().len(),
+                                focused_workspace.layout_flip,
+                            );
                             focused_workspace.focus_container(target_index);
                         }
                         Layout::Custom(_) => {
@@ -1966,8 +1967,11 @@ impl WindowManager {
                     },
                     OperationDirection::Right => match focused_workspace.layout {
                         Layout::Default(layout) => {
-                            let target_index =
-                                layout.leftmost_index(focused_workspace.containers().len());
+                            let target_index = direction.cross_boundary_edge_index(
+                                layout,
+                                focused_workspace.containers().len(),
+                                focused_workspace.layout_flip,
+                            );
                             focused_workspace.focus_container(target_index);
                         }
                         Layout::Custom(_) => {
@@ -2002,8 +2006,11 @@ impl WindowManager {
                 match direction {
                     OperationDirection::Left => match focused_workspace.layout {
                         Layout::Default(layout) => {
-                            let target_index =
-                                layout.rightmost_index(focused_workspace.containers().len());
+                            let target_index = direction.cross_boundary_edge_index(
+                                layout,
+                                focused_workspace.containers().len(),
+                                focused_workspace.layout_flip,
+                            );
                             focused_workspace.focus_container(target_index);
                         }
                         Layout::Custom(_) => {
@@ -2014,8 +2021,11 @@ impl WindowManager {
                     },
                     OperationDirection::Right => match focused_workspace.layout {
                         Layout::Default(layout) => {
-                            let target_index =
-                                layout.leftmost_index(focused_workspace.containers().len());
+                            let target_index = direction.cross_boundary_edge_index(
+                                layout,
+                                focused_workspace.containers().len(),
+                                focused_workspace.layout_flip,
+                            );
                             focused_workspace.focus_container(target_index);
                         }
                         Layout::Custom(_) => {
@@ -2169,8 +2179,11 @@ impl WindowManager {
                 match direction {
                     OperationDirection::Left => match focused_workspace.layout {
                         Layout::Default(layout) => {
-                            let target_index =
-                                layout.rightmost_index(focused_workspace.containers().len());
+                            let target_index = direction.cross_boundary_edge_index(
+                                layout,
+                                focused_workspace.containers().len(),
+                                focused_workspace.layout_flip,
+                            );
                             focused_workspace.focus_container(target_index);
                         }
                         Layout::Custom(_) => {
@@ -2181,8 +2194,11 @@ impl WindowManager {
                     },
                     OperationDirection::Right => match focused_workspace.layout {
                         Layout::Default(layout) => {
-                            let target_index =
-                                layout.leftmost_index(focused_workspace.containers().len());
+                            let target_index = direction.cross_boundary_edge_index(
+                                layout,
+                                focused_workspace.containers().len(),
+                                focused_workspace.layout_flip,
+                            );
                             focused_workspace.focus_container(target_index);
                         }
                         Layout::Custom(_) => {
@@ -2219,8 +2235,11 @@ impl WindowManager {
                         match direction {
                             OperationDirection::Left => match focused_workspace.layout {
                                 Layout::Default(layout) => {
-                                    let target_index = layout
-                                        .rightmost_index(focused_workspace.containers().len());
+                                    let target_index = direction.cross_boundary_edge_index(
+                                        layout,
+                                        focused_workspace.containers().len(),
+                                        focused_workspace.layout_flip,
+                                    );
                                     focused_workspace.focus_container(target_index);
                                 }
                                 Layout::Custom(_) => {
@@ -2231,8 +2250,11 @@ impl WindowManager {
                             },
                             OperationDirection::Right => match focused_workspace.layout {
                                 Layout::Default(layout) => {
-                                    let target_index =
-                                        layout.leftmost_index(focused_workspace.containers().len());
+                                    let target_index = direction.cross_boundary_edge_index(
+                                        layout,
+                                        focused_workspace.containers().len(),
+                                        focused_workspace.layout_flip,
+                                    );
                                     focused_workspace.focus_container(target_index);
                                 }
                                 Layout::Custom(_) => {
@@ -2962,8 +2984,7 @@ impl WindowManager {
 
         let target_idx = match &workspace.layout {
             Layout::Default(_) => 0,
-            Layout::Custom(custom) => custom
-                .first_container_idx(custom.primary_idx().map_or(0, |primary_idx| primary_idx)),
+            Layout::Custom(custom) => custom.first_container_idx(custom.primary_idx().unwrap_or(0)),
         };
 
         workspace.focus_container(target_idx);

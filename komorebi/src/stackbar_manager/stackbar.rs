@@ -174,8 +174,12 @@ impl Stackbar {
         let focused_text_colour = STACKBAR_FOCUSED_TEXT_COLOUR.load_consume();
         let unfocused_text_colour = STACKBAR_UNFOCUSED_TEXT_COLOUR.load_consume();
 
-        let mut stackbars_containers = STACKBARS_CONTAINERS.lock();
-        stackbars_containers.insert(self.hwnd, container.clone());
+        // The wndproc takes this lock on WM_LBUTTONDOWN, so release it before the
+        // synchronous position_window call below or the two threads can deadlock
+        {
+            let mut stackbars_containers = STACKBARS_CONTAINERS.lock();
+            stackbars_containers.insert(self.hwnd, container.clone());
+        }
 
         let mut layout = *layout;
         let workspace_specific_offset =
