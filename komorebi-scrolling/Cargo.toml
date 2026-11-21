@@ -7,3 +7,5 @@ edition = "2024"
 # This crate deliberately has no dependencies: it is geometry and a state machine, and it is
 # meant to be usable by every komorebi, whatever it draws windows with.
 [dependencies]
+bevy_reflect = { workspace = true }
+bevy_ecs = { workspace = true }

@@ -3,8 +3,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
 use strum::EnumString;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Sizing
 pub enum Sizing {

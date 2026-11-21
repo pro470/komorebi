@@ -55,6 +55,8 @@ use komorebi_themes::KomorebiThemeCustom as Custom;
 use serde::Deserialize;
 use serde::Serialize;
 use uds_windows::UnixStream;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
@@ -197,7 +199,7 @@ pub struct WorkspaceGlobals {
     pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 /// Cached per-layout default options (pre-sorted rules) derived from the global `layout_defaults`.
 pub(crate) struct CachedLayoutDefault {
     pub layout_options: Option<LayoutOptions>,

@@ -1,8 +1,10 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 /// How wide a column is.
 ///
 /// The width is part of the column, not of the strip: opening or closing other columns never
 /// changes it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Reflect, Component)]
 pub enum ColumnWidth {
     /// A share of the viewport width, where gaps are taken out first, so that `n` columns of
     /// `1 / n` always tile the viewport exactly, whatever the gaps are.
@@ -16,7 +18,7 @@ pub enum ColumnWidth {
 /// A tile that has been given no height is [`Auto`](Self::Auto): it takes an equal share of what the
 /// tiles with a height of their own leave. Giving one tile a height makes the others in its column
 /// `Auto`, so that there is always something to take up the rest.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect, Component)]
 pub enum TileHeight {
     /// An equal share of what is left over.
     #[default]
@@ -29,7 +31,7 @@ pub enum TileHeight {
 }
 
 /// When focusing a column should also centre it in the viewport.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Component)]
 pub enum CenterFocusedColumn {
     /// Never: a column that is out of view is scrolled in just far enough to be fully visible, and
     /// a column that is already in view does not move the strip at all.
@@ -43,7 +45,7 @@ pub enum CenterFocusedColumn {
 }
 
 /// How a [`ScrollingSpace`](crate::ScrollingSpace) behaves.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Reflect, Component)]
 pub struct Options {
     /// The space between columns and between the columns and the edges of the viewport, in pixels.
     ///

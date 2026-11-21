@@ -12,8 +12,6 @@ use serde::Serialize;
 use strum::Display;
 use strum::EnumString;
 
-use super::direction::Direction;
-use super::Axis;
 
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, Reflect, Component,

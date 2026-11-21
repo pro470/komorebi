@@ -1,8 +1,8 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
-use bevy_ecs::component::Component;
-use bevy_reflect::Reflect;
 
 use color_eyre::eyre;
 use color_eyre::eyre::OptionExt;
@@ -29,10 +29,7 @@ use crate::workspace::Workspace;
 use crate::workspace::WorkspaceGlobals;
 use crate::workspace::WorkspaceLayer;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq
-    Reflect,
-    Component,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Monitor {
     pub id: isize,

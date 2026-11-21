@@ -1,3 +1,5 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use clap::ValueEnum;
 use serde::Deserialize;
 use serde::Serialize;
@@ -7,7 +9,18 @@ use strum::EnumString;
 /// Which way the view goes when the strip of the Scrolling layout is panned: to the left is to
 /// see what is to the left of the screen, which is to move the strip to the right
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, ValueEnum,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum PanDirection {
@@ -28,7 +41,7 @@ impl PanDirection {
 }
 
 /// What the fingers of a gesture that pans the strip do, as far as the strip is concerned
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum PanGesture {
     /// The fingers have landed

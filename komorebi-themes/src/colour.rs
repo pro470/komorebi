@@ -21,6 +21,11 @@ pub enum Colour {
     Hex(Hex),
 }
 
+impl Default for Colour {
+    fn default() -> Self {
+        Self::Rgb(Rgb::default())
+    }
+}
 impl From<Rgb> for Colour {
     fn from(value: Rgb) -> Self {
         Self::Rgb(value)
@@ -82,7 +87,7 @@ impl From<Colour> for u32 {
     }
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component, Default)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Colour represented as RGB
 pub struct Rgb {

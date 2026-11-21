@@ -12,8 +12,6 @@ use strum::EnumString;
     Copy,
     Clone,
     Debug,
-    Serialize,
-    Deserialize,
     Display,
     EnumString,
     ValueEnum,

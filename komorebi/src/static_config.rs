@@ -141,7 +141,7 @@ pub struct BorderColours {
     pub unfocused_locked: Option<Colour>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Theme options
 pub struct ThemeOptions {
@@ -192,7 +192,7 @@ pub struct ThemeOptions {
 }
 
 #[serde_with::serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Wallpaper configuration
 pub struct Wallpaper {

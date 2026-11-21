@@ -49,7 +49,9 @@ pub enum Theme {
     },
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Reflect, Component, Default,
+)]
 /// Base16 colour palette: https://github.com/chriskempson/base16
 pub struct Base16ColourPalette {
     /// Base00
@@ -218,7 +220,19 @@ impl Theme {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, JsonSchema, Display, PartialEq, Reflect, Component)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Display,
+    PartialEq,
+    Reflect,
+    Component,
+)]
 pub enum Base16Value {
     /// Base00
     Base00,
@@ -444,7 +458,7 @@ impl CatppuccinValue {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 /// Theme from catppuccin-egui
 pub struct KomorebiThemeCatppuccin {
@@ -494,12 +508,12 @@ pub struct KomorebiThemeCatppuccin {
     #[cfg_attr(feature = "schemars", schemars(extend("default" = CatppuccinValue::Blue)))]
     pub bar_accent: Option<CatppuccinValue>,
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 /// Theme from base16-egui-themes
 pub struct KomorebiThemeBase16 {
     /// Name of the Base16 theme (theme previews: https://tinted-theming.github.io/tinted-gallery/)
+    #[reflect(ignore, default = "default_base")]
     pub name: Base16,
     /// Single window border colour
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -545,12 +559,36 @@ pub struct KomorebiThemeBase16 {
     #[cfg_attr(feature = "schemars", schemars(extend("default" = Base16Value::Base0D)))]
     pub bar_accent: Option<Base16Value>,
 }
+fn default_base() -> Base16 {
+    Base16::Apathy
+}
+impl Default for KomorebiThemeBase16 {
+    fn default() -> Self {
+        Self {
+            name: Base16::Apathy,
+            single_border: None,
+            stack_border: None,
+            monocle_border: None,
+            floating_border: None,
+            unfocused_border: None,
+            unfocused_locked_border: None,
+            #[cfg(target_os = "windows")]
+            stackbar_focused_text: None,
+            #[cfg(target_os = "windows")]
+            stackbar_unfocused_text: None,
+            #[cfg(target_os = "windows")]
+            stackbar_background: None,
+            bar_accent: None,
+        }
+    }
+}
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 /// Custom Base16 theme
 pub struct KomorebiThemeCustom {
     /// Colours of the custom Base16 theme palette
+    #[reflect(ignore, default = "default_base16")]
     pub colours: Box<Base16ColourPalette>,
     /// Single window border colour
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -596,8 +634,10 @@ pub struct KomorebiThemeCustom {
     #[cfg_attr(feature = "schemars", schemars(extend("default" = Base16Value::Base0D)))]
     pub bar_accent: Option<Base16Value>,
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+fn default_base16() -> Box<Base16ColourPalette> {
+    Box::new(Base16ColourPalette::default())
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[serde(tag = "palette")]
 /// Komorebi theme
@@ -611,6 +651,12 @@ pub enum KomorebiTheme {
     #[cfg_attr(feature = "schemars", schemars(title = "Custom"))]
     /// Custom Base16 theme
     Custom(KomorebiThemeCustom),
+}
+
+impl Default for KomorebiTheme {
+    fn default() -> Self {
+        KomorebiTheme::Base16(KomorebiThemeBase16::default())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

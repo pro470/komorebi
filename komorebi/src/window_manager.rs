@@ -17,9 +17,9 @@ use color_eyre::eyre;
 use color_eyre::eyre::OptionExt;
 use color_eyre::eyre::bail;
 use crossbeam_channel::Receiver;
-use hotwatch::EventKind;
 use hotwatch::Hotwatch;
 use hotwatch::notify::ErrorKind as NotifyErrorKind;
+use hotwatch::{Error, EventKind};
 use parking_lot::Mutex;
 use uds_windows::UnixListener;
 use uds_windows::UnixStream;
@@ -853,11 +853,11 @@ impl WindowManager {
 
         if let Some(hwnd) = hwnd {
             if self.has_pending_raise_op
-                    || self.focused_window()?.hwnd == hwnd
-                    // Sometimes we need this check, because the focus may have been given by a click
-                    // to a non-window such as the taskbar or system tray, and komorebi doesn't know that
-                    // the focused window of the workspace is not actually focused by the OS at that point
-                    || WindowsApi::foreground_window()? == hwnd
+                || self.focused_window()?.hwnd == hwnd
+                // Sometimes we need this check, because the focus may have been given by a click
+                // to a non-window such as the taskbar or system tray, and komorebi doesn't know that
+                // the focused window of the workspace is not actually focused by the OS at that point
+                || WindowsApi::foreground_window()? == hwnd
             {
                 return Ok(());
             }
@@ -1178,7 +1178,7 @@ impl WindowManager {
                     // and we don't have any floating windows that should show on top
                     && self.focused_workspace()?.floating_windows().is_empty()
                     && let Ok(window) = self.focused_window_mut()
-                        && trigger_focus
+                    && trigger_focus
                 {
                     window.focus(self.mouse_follows_focus)?;
                 }

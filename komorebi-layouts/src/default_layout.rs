@@ -5,6 +5,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
 use strum::EnumString;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 
 use super::OperationDirection;
 use super::Rect;
@@ -56,7 +58,7 @@ pub fn validate_ratios(ratios: &[f32]) -> [Option<f32>; MAX_RATIOS] {
 }
 
 #[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Display, EnumString, ValueEnum,
+    Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Display, EnumString, ValueEnum,Reflect, Component
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// A predefined komorebi layout
@@ -195,7 +197,7 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Options for specific layouts
 pub struct LayoutOptions {
@@ -249,7 +251,7 @@ focus came from. A boolean is also accepted, where `true` is `Always` and `false
     })
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Options for the Scrolling layout
 pub struct ScrollingLayoutOptions {
@@ -263,7 +265,7 @@ pub struct ScrollingLayoutOptions {
     pub center_focused_column: Option<crate::scrolling::ScrollingCentering>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Options for the Grid layout
 pub struct GridLayoutOptions {
@@ -271,7 +273,7 @@ pub struct GridLayoutOptions {
     pub rows: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Per-layout default options entry for the `layout_defaults` global setting.
 /// Contains both base layout options and threshold-based layout options rules.

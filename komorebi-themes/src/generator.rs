@@ -7,10 +7,12 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::path::Path;
 
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Theme variant
 pub enum ThemeVariant {

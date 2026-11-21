@@ -10,6 +10,8 @@
 //! this module the questions that do not depend on the platform. How it carries out the answers
 //! (animating, hiding, parking at an edge) is its own business.
 
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use crate::LayoutOptions;
 use crate::OperationDirection;
 use crate::Rect;
@@ -42,7 +44,7 @@ pub const MINIMUM_WINDOW_HEIGHT: i32 = 100;
 ///
 /// A boolean is also accepted when reading, for the layout option that used to be one: `true` is
 /// `Always` and `false` is `Never`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum ScrollingCentering {
     /// Scroll just far enough to bring the focused column into view, and no further

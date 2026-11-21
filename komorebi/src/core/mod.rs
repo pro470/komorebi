@@ -201,7 +201,7 @@ pub enum SocketMessage {
     WatchConfiguration(bool),
     CompleteConfiguration,
     AltFocusHack(bool),
-    Theme(Box<KomorebiTheme>),
+    Theme(#[reflect(ignore)] Box<KomorebiTheme>),
     Animation(bool, Option<AnimationPrefix>),
     AnimationDuration(u64, Option<AnimationPrefix>),
     AnimationFps(u64),
@@ -541,7 +541,16 @@ pub enum WindowContainerBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
     Reflect,
     Component,
 )]
@@ -556,7 +565,16 @@ pub enum FloatingLayerBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
     Reflect,
     Component,
 )]
@@ -610,6 +628,8 @@ impl Placement {
     PartialEq,
     Eq,
     Hash,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Placement strategy for new windows in a workspace
@@ -633,7 +653,7 @@ pub enum WindowPlacement {
 /// or a 1-based container index (e.g. `"1"`, `"3"`).
 ///
 /// NOTE: Integer indices are 1-based in the config for user-friendliness.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Reflect, Component)]
 pub enum PlacementTarget {
     /// A named placement strategy
     Placement(WindowPlacement),
@@ -766,7 +786,7 @@ impl<'de> Deserialize<'de> for PlacementTarget {
 ///
 /// NOTE: This feature currently only applies when `WindowContainerBehaviour::Create` is active.
 /// Future versions may support toggling this for `Append` mode as well.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum InitialWindowPlacementRules {
@@ -812,7 +832,7 @@ pub enum InitialWindowPlacementRules {
 ///   ]
 /// ]
 /// ```
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum PlacementMatchingRules {
@@ -824,7 +844,18 @@ pub enum PlacementMatchingRules {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, Display, EnumString, ValueEnum,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    Reflect,
+    Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Move behaviour when the operation works across a monitor boundary
@@ -839,7 +870,16 @@ pub enum MoveBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
     Reflect,
     Component,
 )]
@@ -854,7 +894,16 @@ pub enum CrossBoundaryBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
     Reflect,
     Component,
 )]
@@ -868,7 +917,16 @@ pub enum MonocleFocusBehaviour {
     NoOp,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
     Reflect,
     Component,
 )]
@@ -885,14 +943,10 @@ pub enum HidingBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, Display, EnumString, ValueEnum,
-    Reflect,
-    Component,
-)]
-#[derive(
     Clone,
     Copy,
     Debug,
+    Default,
     PartialEq,
     Serialize,
     Deserialize,
@@ -913,7 +967,16 @@ pub enum OperationBehaviour {
 }
 
 #[derive(
-    Clone, Copy, Debug, Default, Serialize, Deserialize, Display, EnumString, ValueEnum, PartialEq,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    ValueEnum,
+    PartialEq,
     Reflect,
     Component,
 )]

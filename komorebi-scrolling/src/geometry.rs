@@ -1,10 +1,12 @@
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 /// The size of the area that the strip scrolls through.
 ///
 /// This is the working area of a monitor: whatever is left once the host has taken out the menu
 /// bar, the dock and any padding it wants. The model never learns where that area sits on a
 /// screen. Every coordinate it returns is relative to the area's top left corner, and the host
 /// adds its own offset.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect, Component)]
 pub struct Viewport {
     /// How wide the area is, in pixels.
     pub width: i32,

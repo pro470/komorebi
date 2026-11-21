@@ -5,6 +5,8 @@ use crate::Rect;
 use crate::TileHeight;
 use crate::Viewport;
 use crate::view;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 
 /// How far a float may be off when deciding whether a column is inside the viewport. Widths come
 /// from proportions, so the edges of columns that fit exactly are rarely exact.
@@ -16,7 +18,7 @@ const EPSILON: f64 = 1e-6;
 /// that fraction must not make its neighbour count as out of view.
 const TOLERANCE: f64 = 1.0;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Reflect, Component)]
 struct Column<K> {
     /// The key of the first tile, from the top, which is also the key of the column.
     id: K,
@@ -137,7 +139,7 @@ pub struct Placement<K> {
 ///
 /// A tile that goes to another strip takes this with it, so that it is not as wide there as the
 /// default again, and [`ScrollingSpace::arrive`] is how the other strip is told.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Reflect, Component)]
 pub struct ColumnRecord {
     width: Option<ColumnWidth>,
     preset: Option<usize>,
@@ -194,7 +196,7 @@ pub struct Snap<K> {
 /// Columns are identified by a key `K` of the host's choosing, usually the id of whatever the
 /// host keeps its windows in. All of a column's state is looked up by that key, so it stays with
 /// the column when columns are reordered.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Reflect, Component)]
 pub struct ScrollingSpace<K> {
     options: Options,
     viewport: Viewport,

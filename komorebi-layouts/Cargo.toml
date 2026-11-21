@@ -12,13 +12,15 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 strum = { workspace = true }
 tracing = { workspace = true }
+bevy_reflect = { workspace = true }
+bevy_ecs = { workspace = true }
 
 # Optional dependencies
 schemars = { workspace = true, optional = true }
 windows = { workspace = true, optional = true }
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
-  "std",
-  "CFCGTypes",
+    "std",
+    "CFCGTypes",
 ], optional = true }
 
 [features]

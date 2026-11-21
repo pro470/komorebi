@@ -2227,9 +2227,6 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
             SocketMessage::ApplyState(ref state) => {
                 self.apply_state(state.clone());
             }
-            SocketMessage::ApplyState(ref state) => {
-                self.apply_state(state.clone());
-            }
             // Deprecated commands
             SocketMessage::AltFocusHack(_)
             | SocketMessage::IdentifyBorderOverflowApplication(_, _) => {}
@@ -2243,7 +2240,7 @@ if (!(Get-Process komorebi-bar -ErrorAction SilentlyContinue))
                 event: NotificationEvent::Socket(message.clone()),
                 state: self.as_ref().into(),
             },
-            initial_state.has_been_modified(&State::from(&*self)),
+            initial_state.has_been_modified(&*self),
         )?;
 
         if force_update_borders {

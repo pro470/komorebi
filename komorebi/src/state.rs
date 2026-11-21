@@ -50,9 +50,11 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct State {
     pub monitors: Ring<Monitor>,
