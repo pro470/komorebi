@@ -15,29 +15,30 @@ use eframe::egui::ViewportBuilder;
 use font_loader::system_fonts;
 use hotwatch::EventKind;
 use hotwatch::Hotwatch;
-use image::RgbaImage;
+use komorebi_client::PathExt;
 use komorebi_client::SocketMessage;
 use komorebi_client::SubscribeOptions;
-use std::collections::HashMap;
+use komorebi_client::replace_env_in_path;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicI32;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::LazyLock;
-use std::sync::Mutex;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::LPARAM;
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext;
 use windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
+use windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext;
 use windows::Win32::UI::WindowsAndMessaging::EnumThreadWindows;
 use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 use windows_core::BOOL;
+
+use std::sync::atomic::AtomicBool;
 
 pub static MAX_LABEL_WIDTH: AtomicI32 = AtomicI32::new(400);
 pub static MONITOR_LEFT: AtomicI32 = AtomicI32::new(0);
@@ -47,8 +48,22 @@ pub static MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
 pub static BAR_HEIGHT: f32 = 50.0;
 pub static DEFAULT_PADDING: f32 = 10.0;
 
-pub static ICON_CACHE: LazyLock<Mutex<HashMap<String, RgbaImage>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Flag to indicate that a widget has consumed a click event this frame.
+/// This prevents the bar's global mouse handler from also processing the click.
+pub static WIDGET_CLICKED: AtomicBool = AtomicBool::new(false);
+
+/// Mark that a widget has consumed a click event this frame.
+pub fn mark_widget_clicked() {
+    WIDGET_CLICKED.store(true, Ordering::SeqCst);
+}
+
+/// Check if a widget has consumed a click event this frame and reset the flag.
+pub fn take_widget_clicked() -> bool {
+    WIDGET_CLICKED.swap(false, Ordering::SeqCst)
+}
+
+pub static AUTO_SELECT_FILL_COLOUR: AtomicU32 = AtomicU32::new(0);
+pub static AUTO_SELECT_TEXT_COLOUR: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Parser)]
 #[clap(author, about, version)]
@@ -61,6 +76,7 @@ struct Opts {
     fonts: bool,
     /// Path to a JSON or YAML configuration file
     #[clap(short, long)]
+    #[clap(value_parser = replace_env_in_path)]
     config: Option<PathBuf>,
     /// Write an example komorebi.bar.json to disk
     #[clap(long)]
@@ -114,15 +130,8 @@ fn main() -> color_eyre::Result<()> {
 
     #[cfg(feature = "schemars")]
     if opts.schema {
-        let settings = schemars::gen::SchemaSettings::default().with(|s| {
-            s.option_nullable = false;
-            s.option_add_null_type = false;
-            s.inline_subschemas = true;
-        });
-
-        let gen = settings.into_generator();
-        let socket_message = gen.into_root_schema_for::<KomobarConfig>();
-        let schema = serde_json::to_string_pretty(&socket_message)?;
+        let bar_config = schemars::schema_for!(KomobarConfig);
+        let schema = serde_json::to_string_pretty(&bar_config)?;
 
         println!("{schema}");
         std::process::exit(0);
@@ -137,13 +146,17 @@ fn main() -> color_eyre::Result<()> {
     }
 
     if std::env::var("RUST_LIB_BACKTRACE").is_err() {
-        std::env::set_var("RUST_LIB_BACKTRACE", "1");
+        unsafe {
+            std::env::set_var("RUST_LIB_BACKTRACE", "1");
+        }
     }
 
     color_eyre::install()?;
 
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
+        unsafe {
+            std::env::set_var("RUST_LOG", "info");
+        }
     }
 
     tracing::subscriber::set_global_default(
@@ -155,13 +168,14 @@ fn main() -> color_eyre::Result<()> {
     let home_dir: PathBuf = std::env::var("KOMOREBI_CONFIG_HOME").map_or_else(
         |_| dirs::home_dir().expect("there is no home directory"),
         |home_path| {
-            let home = PathBuf::from(&home_path);
+            let home = home_path.replace_env();
 
-            if home.as_path().is_dir() {
-                home
-            } else {
-                panic!("$Env:KOMOREBI_CONFIG_HOME is set to '{home_path}', which is not a valid directory");
-            }
+            assert!(
+                home.is_dir(),
+                "$Env:KOMOREBI_CONFIG_HOME is set to '{home_path}', which is not a valid directory"
+            );
+
+            home
         },
     );
 
@@ -170,7 +184,7 @@ fn main() -> color_eyre::Result<()> {
         std::fs::write(home_dir.join("komorebi.bar.json"), komorebi_bar_json)?;
         println!(
             "Example komorebi.bar.json file written to {}",
-            home_dir.as_path().display()
+            home_dir.display()
         );
 
         std::process::exit(0);
@@ -178,16 +192,11 @@ fn main() -> color_eyre::Result<()> {
 
     let default_config_path = home_dir.join("komorebi.bar.json");
 
-    let config_path = opts.config.map_or_else(
-        || {
-            if !default_config_path.is_file() {
-                None
-            } else {
-                Some(default_config_path.clone())
-            }
-        },
-        Option::from,
-    );
+    let config_path = opts.config.or_else(|| {
+        default_config_path
+            .is_file()
+            .then_some(default_config_path.clone())
+    });
 
     let mut config = match config_path {
         None => {
@@ -197,17 +206,14 @@ fn main() -> color_eyre::Result<()> {
             std::fs::write(&default_config_path, komorebi_bar_json)?;
             tracing::info!(
                 "created example configuration file: {}",
-                default_config_path.as_path().display()
+                default_config_path.display()
             );
 
             KomobarConfig::read(&default_config_path)?
         }
         Some(ref config) => {
             if !opts.aliases {
-                tracing::info!(
-                    "found configuration file: {}",
-                    config.as_path().to_string_lossy()
-                );
+                tracing::info!("found configuration file: {}", config.display());
             }
 
             KomobarConfig::read(config)?
@@ -226,28 +232,30 @@ fn main() -> color_eyre::Result<()> {
     )?)?;
 
     let (usr_monitor_index, work_area_offset) = match &config.monitor {
-        MonitorConfigOrIndex::MonitorConfig(monitor_config) => {
+        Some(MonitorConfigOrIndex::MonitorConfig(monitor_config)) => {
             (monitor_config.index, monitor_config.work_area_offset)
         }
-        MonitorConfigOrIndex::Index(idx) => (*idx, None),
+        Some(MonitorConfigOrIndex::Index(idx)) => (*idx, None),
+        None => (0, None),
     };
+
     let monitor_index = state
         .monitor_usr_idx_map
         .get(&usr_monitor_index)
         .map_or(usr_monitor_index, |i| *i);
 
     MONITOR_RIGHT.store(
-        state.monitors.elements()[monitor_index].size().right,
+        state.monitors.elements()[monitor_index].size.right,
         Ordering::SeqCst,
     );
 
     MONITOR_TOP.store(
-        state.monitors.elements()[monitor_index].size().top,
+        state.monitors.elements()[monitor_index].size.top,
         Ordering::SeqCst,
     );
 
     MONITOR_LEFT.store(
-        state.monitors.elements()[monitor_index].size().left,
+        state.monitors.elements()[monitor_index].size.left,
         Ordering::SeqCst,
     );
 
@@ -257,11 +265,11 @@ fn main() -> color_eyre::Result<()> {
         None => {
             config.position = Some(PositionConfig {
                 start: Some(Position {
-                    x: state.monitors.elements()[monitor_index].size().left as f32,
-                    y: state.monitors.elements()[monitor_index].size().top as f32,
+                    x: state.monitors.elements()[monitor_index].size.left as f32,
+                    y: state.monitors.elements()[monitor_index].size.top as f32,
                 }),
                 end: Some(Position {
-                    x: state.monitors.elements()[monitor_index].size().right as f32,
+                    x: state.monitors.elements()[monitor_index].size.right as f32,
                     y: 50.0,
                 }),
             })
@@ -269,14 +277,14 @@ fn main() -> color_eyre::Result<()> {
         Some(ref mut position) => {
             if position.start.is_none() {
                 position.start = Some(Position {
-                    x: state.monitors.elements()[monitor_index].size().left as f32,
-                    y: state.monitors.elements()[monitor_index].size().top as f32,
+                    x: state.monitors.elements()[monitor_index].size.left as f32,
+                    y: state.monitors.elements()[monitor_index].size.top as f32,
                 });
             }
 
             if position.end.is_none() {
                 position.end = Some(Position {
-                    x: state.monitors.elements()[monitor_index].size().right as f32,
+                    x: state.monitors.elements()[monitor_index].size.right as f32,
                     y: 50.0,
                 })
             }
@@ -307,10 +315,7 @@ fn main() -> color_eyre::Result<()> {
     hotwatch.watch(config_path, move |event| match event.kind {
         EventKind::Modify(_) | EventKind::Remove(_) => match KomobarConfig::read(&config_path_cl) {
             Ok(updated) => {
-                tracing::info!(
-                    "configuration file updated: {}",
-                    config_path_cl.as_path().to_string_lossy()
-                );
+                tracing::info!("configuration file updated: {}", config_path_cl.display());
 
                 if let Err(error) = tx_config.send(updated) {
                     tracing::error!("could not send configuration update to gui: {error}")
@@ -364,7 +369,7 @@ fn main() -> color_eyre::Result<()> {
                                 while komorebi_client::send_message(
                                     &SocketMessage::AddSubscriberSocket(subscriber_name.clone()),
                                 )
-                                .is_err()
+                                    .is_err()
                                 {
                                     std::thread::sleep(Duration::from_secs(1));
                                 }
@@ -415,5 +420,5 @@ fn main() -> color_eyre::Result<()> {
             Ok(Box::new(Komobar::new(cc, rx_gui, rx_config, config)))
         }),
     )
-    .map_err(|error| color_eyre::eyre::Error::msg(error.to_string()))
+        .map_err(|error| color_eyre::eyre::Error::msg(error.to_string()))
 }

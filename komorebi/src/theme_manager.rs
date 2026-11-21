@@ -1,18 +1,22 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::KomorebiTheme;
 use crate::border_manager;
 use crate::stackbar_manager;
 use crate::stackbar_manager::STACKBAR_FOCUSED_TEXT_COLOUR;
 use crate::stackbar_manager::STACKBAR_TAB_BACKGROUND_COLOUR;
 use crate::stackbar_manager::STACKBAR_UNFOCUSED_TEXT_COLOUR;
-use crate::Colour;
-use crate::KomorebiTheme;
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
 use crossbeam_utils::atomic::AtomicCell;
+use komorebi_themes::Base16Wrapper;
+use komorebi_themes::KomorebiThemeBase16 as Base16;
+use komorebi_themes::KomorebiThemeCatppuccin as Catppuccin;
+use komorebi_themes::KomorebiThemeCustom as Custom;
+use komorebi_themes::colour::Colour;
 use std::ops::Deref;
-use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
 
 pub struct Notification(KomorebiTheme);
 
@@ -50,13 +54,15 @@ pub fn send_notification(theme: KomorebiTheme) {
 }
 
 pub fn listen_for_notifications() {
-    std::thread::spawn(move || loop {
-        match handle_notifications() {
-            Ok(()) => {
-                tracing::warn!("restarting finished thread");
-            }
-            Err(error) => {
-                tracing::warn!("restarting failed thread: {}", error);
+    std::thread::spawn(move || {
+        loop {
+            match handle_notifications() {
+                Ok(()) => {
+                    tracing::warn!("restarting finished thread");
+                }
+                Err(error) => {
+                    tracing::warn!("restarting failed thread: {}", error);
+                }
             }
         }
     });
@@ -76,22 +82,24 @@ pub fn handle_notifications() -> color_eyre::Result<()> {
             monocle_border,
             floating_border,
             unfocused_border,
+            unfocused_locked_border,
             stackbar_focused_text,
             stackbar_unfocused_text,
             stackbar_background,
         ) = match theme {
-            KomorebiTheme::Catppuccin {
+            KomorebiTheme::Catppuccin(Catppuccin {
                 name,
                 single_border,
                 stack_border,
                 monocle_border,
                 floating_border,
                 unfocused_border,
+                unfocused_locked_border,
                 stackbar_focused_text,
                 stackbar_unfocused_text,
                 stackbar_background,
                 ..
-            } => {
+            }) => {
                 let single_border = single_border
                     .unwrap_or(komorebi_themes::CatppuccinValue::Blue)
                     .color32(name.as_theme());
@@ -112,6 +120,10 @@ pub fn handle_notifications() -> color_eyre::Result<()> {
                     .unwrap_or(komorebi_themes::CatppuccinValue::Base)
                     .color32(name.as_theme());
 
+                let unfocused_locked_border = unfocused_locked_border
+                    .unwrap_or(komorebi_themes::CatppuccinValue::Red)
+                    .color32(name.as_theme());
+
                 let stackbar_focused_text = stackbar_focused_text
                     .unwrap_or(komorebi_themes::CatppuccinValue::Green)
                     .color32(name.as_theme());
@@ -130,54 +142,60 @@ pub fn handle_notifications() -> color_eyre::Result<()> {
                     monocle_border,
                     floating_border,
                     unfocused_border,
+                    unfocused_locked_border,
                     stackbar_focused_text,
                     stackbar_unfocused_text,
                     stackbar_background,
                 )
             }
-            KomorebiTheme::Base16 {
+            KomorebiTheme::Base16(Base16 {
                 name,
                 single_border,
                 stack_border,
                 monocle_border,
                 floating_border,
                 unfocused_border,
+                unfocused_locked_border,
                 stackbar_focused_text,
                 stackbar_unfocused_text,
                 stackbar_background,
                 ..
-            } => {
+            }) => {
                 let single_border = single_border
                     .unwrap_or(komorebi_themes::Base16Value::Base0D)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let stack_border = stack_border
                     .unwrap_or(komorebi_themes::Base16Value::Base0B)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let monocle_border = monocle_border
                     .unwrap_or(komorebi_themes::Base16Value::Base0F)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let unfocused_border = unfocused_border
                     .unwrap_or(komorebi_themes::Base16Value::Base01)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
+
+                let unfocused_locked_border = unfocused_locked_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base08)
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let floating_border = floating_border
                     .unwrap_or(komorebi_themes::Base16Value::Base09)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let stackbar_focused_text = stackbar_focused_text
                     .unwrap_or(komorebi_themes::Base16Value::Base0B)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let stackbar_unfocused_text = stackbar_unfocused_text
                     .unwrap_or(komorebi_themes::Base16Value::Base05)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 let stackbar_background = stackbar_background
                     .unwrap_or(komorebi_themes::Base16Value::Base01)
-                    .color32(*name);
+                    .color32(Base16Wrapper::Base16(*name));
 
                 (
                     single_border,
@@ -185,6 +203,68 @@ pub fn handle_notifications() -> color_eyre::Result<()> {
                     monocle_border,
                     floating_border,
                     unfocused_border,
+                    unfocused_locked_border,
+                    stackbar_focused_text,
+                    stackbar_unfocused_text,
+                    stackbar_background,
+                )
+            }
+            KomorebiTheme::Custom(Custom {
+                colours,
+                single_border,
+                stack_border,
+                monocle_border,
+                floating_border,
+                unfocused_border,
+                unfocused_locked_border,
+                stackbar_focused_text,
+                stackbar_unfocused_text,
+                stackbar_background,
+                ..
+            }) => {
+                let single_border = single_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base0D)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let stack_border = stack_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base0B)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let monocle_border = monocle_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base0F)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let unfocused_border = unfocused_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base01)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let unfocused_locked_border = unfocused_locked_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base08)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let floating_border = floating_border
+                    .unwrap_or(komorebi_themes::Base16Value::Base09)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let stackbar_focused_text = stackbar_focused_text
+                    .unwrap_or(komorebi_themes::Base16Value::Base0B)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let stackbar_unfocused_text = stackbar_unfocused_text
+                    .unwrap_or(komorebi_themes::Base16Value::Base05)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                let stackbar_background = stackbar_background
+                    .unwrap_or(komorebi_themes::Base16Value::Base01)
+                    .color32(Base16Wrapper::Custom(colours.clone()));
+
+                (
+                    single_border,
+                    stack_border,
+                    monocle_border,
+                    floating_border,
+                    unfocused_border,
+                    unfocused_locked_border,
                     stackbar_focused_text,
                     stackbar_unfocused_text,
                     stackbar_background,
@@ -198,6 +278,10 @@ pub fn handle_notifications() -> color_eyre::Result<()> {
         border_manager::FLOATING.store(u32::from(Colour::from(floating_border)), Ordering::SeqCst);
         border_manager::UNFOCUSED
             .store(u32::from(Colour::from(unfocused_border)), Ordering::SeqCst);
+        border_manager::UNFOCUSED_LOCKED.store(
+            u32::from(Colour::from(unfocused_locked_border)),
+            Ordering::SeqCst,
+        );
 
         STACKBAR_TAB_BACKGROUND_COLOUR.store(
             u32::from(Colour::from(stackbar_background)),
@@ -216,7 +300,7 @@ pub fn handle_notifications() -> color_eyre::Result<()> {
 
         CURRENT_THEME.store(Some(notification.0));
 
-        border_manager::send_notification(None);
+        border_manager::send_force_update();
         stackbar_manager::send_notification();
     }
 

@@ -132,3 +132,20 @@ running `komorebic stop` and `komorebic start`.
    We can see the _komorebi_ state is no longer associated with the previous
    device: `null`, suggesting an issue when the display resumes from a suspended
    state.
+
+## Komorebi Bar does not render transparency on Nvidia GPUs
+
+Users with Nvidia GPUs may have issues with transparency on the Komorebi Bar.
+
+To solve this the user can do the following:
+
+- Open the Nvidia Control Panel
+- On the left menu tree, under "3D Settings", select "Manage 3D Settings"
+- Select the "Program Settings" tab
+- Press the "Add" button and select "komorebi-bar"
+- Under "3. Specify the settings for this program:", find the feature labelled, "OpenGL GDI compatibility"
+- Change the setting to "Prefer compatibility"
+- At the bottom of the window select "Apply"
+- Restart the Komorebi Bar with "komorebic stop --bar; komorebic start --bar"
+
+This should resolve the issue and your Komorebi Bar should render with the proper transparency.

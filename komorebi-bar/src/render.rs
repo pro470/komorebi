@@ -1,3 +1,5 @@
+use crate::AUTO_SELECT_FILL_COLOUR;
+use crate::AUTO_SELECT_TEXT_COLOUR;
 use crate::bar::Alignment;
 use crate::config::KomobarConfig;
 use crate::config::MonitorConfigOrIndex;
@@ -11,29 +13,38 @@ use eframe::egui::Margin;
 use eframe::egui::Shadow;
 use eframe::egui::TextStyle;
 use eframe::egui::Ui;
+use komorebi_client::Colour;
+use komorebi_client::Rgb;
 use serde::Deserialize;
 use serde::Serialize;
+use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 static SHOW_KOMOREBI_LAYOUT_OPTIONS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "kind")]
+/// Grouping
 pub enum Grouping {
     /// No grouping is applied
+    #[cfg_attr(feature = "schemars", schemars(title = "None"))]
     None,
     /// Widgets are grouped as a whole
+    #[cfg_attr(feature = "schemars", schemars(title = "Bar"))]
     Bar(GroupingConfig),
     /// Widgets are grouped by alignment
+    #[cfg_attr(feature = "schemars", schemars(title = "Alignment"))]
     Alignment(GroupingConfig),
     /// Widgets are grouped individually
+    #[cfg_attr(feature = "schemars", schemars(title = "Widget"))]
     Widget(GroupingConfig),
 }
 
 #[derive(Clone)]
+/// Render configuration
 pub struct RenderConfig {
     /// Komorebi monitor index of the monitor on which to render the bar
     pub monitor_idx: usize,
@@ -55,6 +66,10 @@ pub struct RenderConfig {
     pub icon_font_id: FontId,
     /// Show all icons on the workspace section of the Komorebi widget
     pub show_all_icons: bool,
+    /// Background color of the selected frame
+    pub auto_select_fill: Option<Color32>,
+    /// Text color of the selected frame
+    pub auto_select_text: Option<Color32>,
 }
 
 pub trait RenderExt {
@@ -84,8 +99,9 @@ impl RenderExt for &KomobarConfig {
         icon_font_id.size *= icon_scale.unwrap_or(1.4).clamp(1.0, 2.0);
 
         let monitor_idx = match &self.monitor {
-            MonitorConfigOrIndex::MonitorConfig(monitor_config) => monitor_config.index,
-            MonitorConfigOrIndex::Index(idx) => *idx,
+            Some(MonitorConfigOrIndex::MonitorConfig(monitor_config)) => monitor_config.index,
+            Some(MonitorConfigOrIndex::Index(idx)) => *idx,
+            None => 0,
         };
 
         // check if any of the alignments have a komorebi widget with the workspace set to show all icons
@@ -108,6 +124,10 @@ impl RenderExt for &KomobarConfig {
             text_font_id,
             icon_font_id,
             show_all_icons,
+            auto_select_fill: NonZeroU32::new(AUTO_SELECT_FILL_COLOUR.load(Ordering::SeqCst))
+                .map(|c| Colour::Rgb(Rgb::from(c.get())).into()),
+            auto_select_text: NonZeroU32::new(AUTO_SELECT_TEXT_COLOUR.load(Ordering::SeqCst))
+                .map(|c| Colour::Rgb(Rgb::from(c.get())).into()),
         }
     }
 }
@@ -133,6 +153,8 @@ impl RenderConfig {
             text_font_id: FontId::default(),
             icon_font_id: FontId::default(),
             show_all_icons: false,
+            auto_select_fill: None,
+            auto_select_text: None,
         }
     }
 
@@ -341,6 +363,7 @@ impl RenderConfig {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Grouping configuration
 pub struct GroupingConfig {
     /// Styles for the grouping
     pub style: Option<GroupingStyle>,
@@ -352,7 +375,9 @@ pub struct GroupingConfig {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Grouping Style
 pub enum GroupingStyle {
+    /// Default
     #[serde(alias = "CtByte")]
     Default,
     /// A shadow is added under the default group. (blur: 4, offset: x-1 y-1, spread: 3)
@@ -374,8 +399,9 @@ pub enum GroupingStyle {
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Rounding configuration
 pub enum RoundingConfig {
-    /// All 4 corners are the same    
+    /// All 4 corners are the same
     Same(f32),
     /// All 4 corners are custom. Order: NW, NE, SW, SE
     Individual([f32; 4]),

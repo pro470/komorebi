@@ -1,31 +1,3 @@
-use crate::animation::lerp::Lerp;
-use crate::animation::prefix::new_animation_key;
-use crate::animation::prefix::AnimationPrefix;
-use crate::animation::AnimationEngine;
-use crate::animation::RenderDispatcher;
-use crate::animation::ANIMATION_DURATION_GLOBAL;
-use crate::animation::ANIMATION_DURATION_PER_ANIMATION;
-use crate::animation::ANIMATION_ENABLED_GLOBAL;
-use crate::animation::ANIMATION_ENABLED_PER_ANIMATION;
-use crate::animation::ANIMATION_MANAGER;
-use crate::animation::ANIMATION_STYLE_GLOBAL;
-use crate::animation::ANIMATION_STYLE_PER_ANIMATION;
-use crate::border_manager;
-use crate::com::SetCloak;
-use crate::core::config_generation::IdWithIdentifier;
-use crate::core::config_generation::MatchingRule;
-use crate::core::config_generation::MatchingStrategy;
-use crate::core::ApplicationIdentifier;
-use crate::core::HidingBehaviour;
-use crate::core::Rect;
-use crate::focus_manager;
-use crate::stackbar_manager;
-use crate::styles::ExtendedWindowStyle;
-use crate::styles::WindowStyle;
-use crate::transparency_manager;
-use crate::window_manager_event::WindowManagerEvent;
-use crate::windows_api;
-use crate::windows_api::WindowsApi;
 use crate::AnimationStyle;
 use crate::FLOATING_APPLICATIONS;
 use crate::FLOATING_WINDOW_TOGGLE_ASPECT_RATIO;
@@ -40,16 +12,45 @@ use crate::REGEX_IDENTIFIERS;
 use crate::SLOW_APPLICATION_COMPENSATION_TIME;
 use crate::SLOW_APPLICATION_IDENTIFIERS;
 use crate::WSL2_UI_PROCESSES;
+use crate::animation::ANIMATION_DURATION_GLOBAL;
+use crate::animation::ANIMATION_DURATION_PER_ANIMATION;
+use crate::animation::ANIMATION_ENABLED_GLOBAL;
+use crate::animation::ANIMATION_ENABLED_PER_ANIMATION;
+use crate::animation::ANIMATION_MANAGER;
+use crate::animation::ANIMATION_STYLE_GLOBAL;
+use crate::animation::ANIMATION_STYLE_PER_ANIMATION;
+use crate::animation::AnimationEngine;
+use crate::animation::RenderDispatcher;
+use crate::animation::ghost_dispatcher::GhostDispatcher;
+use crate::animation::lerp::Lerp;
+use crate::animation::prefix::AnimationPrefix;
+use crate::animation::prefix::new_animation_key;
+use crate::animation::transition;
+use crate::border_manager;
+use crate::cloaked;
+use crate::com::SetCloak;
+use crate::core::ApplicationIdentifier;
+use crate::core::HidingBehaviour;
+use crate::core::Rect;
+use crate::core::config_generation::IdWithIdentifier;
+use crate::core::config_generation::MatchingRule;
+use crate::core::config_generation::MatchingStrategy;
+use crate::live_resize;
+use crate::styles::ExtendedWindowStyle;
+use crate::styles::WindowStyle;
+use crate::transparency_manager;
+use crate::window_manager_event::WindowManagerEvent;
+use crate::windows_api;
+use crate::windows_api::WindowsApi;
 use bevy_ecs::component::Component;
 use bevy_reflect::Reflect;
 use color_eyre::eyre;
-use color_eyre::Result;
 use crossbeam_utils::atomic::AtomicConsume;
 use regex::Regex;
-use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::Serializer;
+use serde::ser::SerializeStruct;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Display;
@@ -130,7 +131,7 @@ impl Display for Window {
 }
 
 impl Serialize for Window {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> eyre::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -159,78 +160,6 @@ impl Serialize for Window {
             &WindowsApi::window_rect(self.hwnd).unwrap_or_default(),
         )?;
         state.end()
-    }
-}
-
-struct MovementRenderDispatcher {
-    hwnd: isize,
-    start_rect: Rect,
-    target_rect: Rect,
-    top: bool,
-    style: AnimationStyle,
-}
-
-impl MovementRenderDispatcher {
-    const PREFIX: AnimationPrefix = AnimationPrefix::Movement;
-
-    pub fn new(
-        hwnd: isize,
-        start_rect: Rect,
-        target_rect: Rect,
-        top: bool,
-        style: AnimationStyle,
-    ) -> Self {
-        Self {
-            hwnd,
-            start_rect,
-            target_rect,
-            top,
-            style,
-        }
-    }
-}
-
-impl RenderDispatcher for MovementRenderDispatcher {
-    fn get_animation_key(&self) -> String {
-        new_animation_key(MovementRenderDispatcher::PREFIX, self.hwnd.to_string())
-    }
-
-    fn pre_render(&self) -> Result<()> {
-        stackbar_manager::STACKBAR_TEMPORARILY_DISABLED.store(true, Ordering::SeqCst);
-        stackbar_manager::send_notification();
-
-        Ok(())
-    }
-
-    fn render(&self, progress: f64) -> Result<()> {
-        let new_rect = self.start_rect.lerp(self.target_rect, progress, self.style);
-
-        // using MoveWindow because it runs faster than SetWindowPos
-        // so animation have more fps and feel smoother
-        WindowsApi::move_window(self.hwnd, &new_rect, false)?;
-        WindowsApi::invalidate_rect(self.hwnd, None, false);
-
-        Ok(())
-    }
-
-    fn post_render(&self) -> Result<()> {
-        WindowsApi::position_window(self.hwnd, &self.target_rect, self.top)?;
-        if ANIMATION_MANAGER
-            .lock()
-            .count_in_progress(MovementRenderDispatcher::PREFIX)
-            == 0
-        {
-            if WindowsApi::foreground_window().unwrap_or_default() == self.hwnd {
-                focus_manager::send_notification(self.hwnd)
-            }
-
-            stackbar_manager::STACKBAR_TEMPORARILY_DISABLED.store(false, Ordering::SeqCst);
-
-            stackbar_manager::send_notification();
-            transparency_manager::send_notification();
-        }
-
-        Ok(())
     }
 }
 
@@ -267,7 +196,7 @@ impl RenderDispatcher for TransparencyRenderDispatcher {
         new_animation_key(TransparencyRenderDispatcher::PREFIX, self.hwnd.to_string())
     }
 
-    fn pre_render(&self) -> Result<()> {
+    fn pre_render(&self) -> eyre::Result<()> {
         //transparent
         if !self.is_opaque {
             let window = Window::from(self.hwnd);
@@ -279,7 +208,7 @@ impl RenderDispatcher for TransparencyRenderDispatcher {
         Ok(())
     }
 
-    fn render(&self, progress: f64) -> Result<()> {
+    fn render(&self, progress: f64) -> eyre::Result<()> {
         WindowsApi::set_transparent(
             self.hwnd,
             self.start_opacity
@@ -287,7 +216,7 @@ impl RenderDispatcher for TransparencyRenderDispatcher {
         )
     }
 
-    fn post_render(&self) -> Result<()> {
+    fn post_render(&self) -> eyre::Result<()> {
         //opaque
         if self.is_opaque {
             let window = Window::from(self.hwnd);
@@ -305,10 +234,13 @@ impl RenderDispatcher for TransparencyRenderDispatcher {
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Aspect ratio for temporarily floating windows
 pub enum AspectRatio {
-    /// A predefined aspect ratio
+    /// Predefined aspect ratio
+    #[cfg_attr(feature = "schemars", schemars(title = "Predefined"))]
     Predefined(PredefinedAspectRatio),
-    /// A custom W:H aspect ratio
+    /// Custom W:H aspect ratio
+    #[cfg_attr(feature = "schemars", schemars(title = "Custom"))]
     Custom(i32, i32),
 }
 
@@ -332,6 +264,7 @@ impl Default for AspectRatio {
     Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Predefined aspect ratio
 pub enum PredefinedAspectRatio {
     /// 21:9
     Ultrawide,
@@ -360,7 +293,7 @@ impl Window {
         HWND(windows_api::as_ptr!(self.hwnd))
     }
 
-    pub fn move_to_area(&mut self, current_area: &Rect, target_area: &Rect) -> Result<()> {
+    pub fn move_to_area(&mut self, current_area: &Rect, target_area: &Rect) -> eyre::Result<()> {
         let current_rect = WindowsApi::window_rect(self.hwnd)?;
         let x_diff = target_area.left - current_area.left;
         let y_diff = target_area.top - current_area.top;
@@ -390,14 +323,14 @@ impl Window {
             windows_api::WindowsApi::unmaximize_window(self.hwnd);
             let animation_enabled = ANIMATION_ENABLED_PER_ANIMATION.lock();
             let move_enabled = animation_enabled
-                .get(&MovementRenderDispatcher::PREFIX)
+                .get(&GhostDispatcher::PREFIX)
                 .is_some_and(|v| *v);
             drop(animation_enabled);
 
             if move_enabled || ANIMATION_ENABLED_GLOBAL.load(Ordering::SeqCst) {
                 let anim_count = ANIMATION_MANAGER
                     .lock()
-                    .count_in_progress(MovementRenderDispatcher::PREFIX);
+                    .count_in_progress(GhostDispatcher::PREFIX);
                 self.set_position(&new_rect, true)?;
                 let hwnd = self.hwnd;
                 // Wait for the animation to finish before maximizing the window again, otherwise
@@ -405,13 +338,13 @@ impl Window {
                 thread::spawn(move || {
                     let mut new_anim_count = ANIMATION_MANAGER
                         .lock()
-                        .count_in_progress(MovementRenderDispatcher::PREFIX);
+                        .count_in_progress(GhostDispatcher::PREFIX);
                     let mut max_wait = 2000; // Max waiting time. No one will be using an animation longer than 2s, right? RIGHT??? WHY?
                     while new_anim_count > anim_count && max_wait > 0 {
                         thread::sleep(Duration::from_millis(10));
                         new_anim_count = ANIMATION_MANAGER
                             .lock()
-                            .count_in_progress(MovementRenderDispatcher::PREFIX);
+                            .count_in_progress(GhostDispatcher::PREFIX);
                         max_wait -= 1;
                     }
                     windows_api::WindowsApi::maximize_window(hwnd);
@@ -427,12 +360,18 @@ impl Window {
         Ok(())
     }
 
-    pub fn center(&mut self, work_area: &Rect) -> Result<()> {
-        let (aspect_ratio_width, aspect_ratio_height) = FLOATING_WINDOW_TOGGLE_ASPECT_RATIO
-            .lock()
-            .width_and_height();
-        let target_height = work_area.bottom / 2;
-        let target_width = (target_height * aspect_ratio_width) / aspect_ratio_height;
+    pub fn center(&mut self, work_area: &Rect, resize: bool) -> eyre::Result<()> {
+        let (target_width, target_height) = if resize {
+            let (aspect_ratio_width, aspect_ratio_height) = FLOATING_WINDOW_TOGGLE_ASPECT_RATIO
+                .lock()
+                .width_and_height();
+            let target_height = work_area.bottom / 2;
+            let target_width = (target_height * aspect_ratio_width) / aspect_ratio_height;
+            (target_width, target_height)
+        } else {
+            let current_rect = WindowsApi::window_rect(self.hwnd)?;
+            (current_rect.right, current_rect.bottom)
+        };
 
         let x = work_area.left + ((work_area.right - target_width) / 2);
         let y = work_area.top + ((work_area.bottom - target_height) / 2);
@@ -448,15 +387,84 @@ impl Window {
         )
     }
 
-    pub fn set_position(&self, layout: &Rect, top: bool) -> Result<()> {
-        let window_rect = WindowsApi::window_rect(self.hwnd)?;
+    pub fn set_position(&self, layout: &Rect, top: bool) -> eyre::Result<()> {
+        // a window of the workspace that has been switched to slides in from the
+        // side of the monitor, which is so even if it is where the layout puts it
+        // already, as it was when it was hidden
+        if let Some(slid) = transition::slide_in(*self, layout, top) {
+            return slid;
+        }
 
-        if window_rect.eq(layout) {
+        // and it is put where it goes by that animation, which a layout that is
+        // done while it is on its way is not to cancel
+        if transition::is_sliding_in(self.hwnd) {
             return Ok(());
         }
 
+        // a window that the user has hold of by an edge is where they put it, until
+        // they let go
+        if live_resize::is_dragging(self.hwnd) {
+            return Ok(());
+        }
+
+        let window_rect = WindowsApi::window_rect(self.hwnd)?;
+
+        if window_rect.eq(layout) {
+            if live_resize::is_stepping() {
+                tracing::debug!(
+                    "live resize: hwnd {} is where it is to be, {layout:?}",
+                    self.hwnd
+                );
+                live_resize::follow(self.hwnd, &window_rect, layout);
+            }
+
+            return Ok(());
+        }
+
+        // the neighbours of a window being dragged follow it as it goes, which is
+        // not to be seen catching up
+        if live_resize::is_stepping() {
+            // what a window that is resized is seen to do is covered: the cover is where the
+            // window is to be, which is the pointer's, and the window is sent there when
+            // the drag is over
+            if live_resize::follow(self.hwnd, &window_rect, layout) {
+                return Ok(());
+            }
+
+            if live_resize::is_catching_up(self.hwnd, layout) {
+                tracing::debug!(
+                    "live resize: hwnd {} is at {window_rect:?}, not yet where it was sent, left alone for {layout:?}",
+                    self.hwnd
+                );
+                return Ok(());
+            }
+
+            tracing::debug!(
+                "live resize: hwnd {} sent to {layout:?} from {window_rect:?} ({})",
+                self.hwnd,
+                if live_resize::is_pacing() {
+                    "step"
+                } else {
+                    "end"
+                }
+            );
+            live_resize::sent(self.hwnd, layout);
+            return WindowsApi::position_window(self.hwnd, layout, top, true);
+        }
+
+        // a command that resizes windows puts them where they go at once: one that is on its
+        // way somewhere is stopped where it is, first
+        if live_resize::is_in_place() {
+            let key = new_animation_key(GhostDispatcher::PREFIX, self.hwnd.to_string());
+            if ANIMATION_MANAGER.lock().in_progress(&key) {
+                AnimationEngine::cancel(&key);
+            }
+
+            return WindowsApi::position_window(self.hwnd, layout, top, true);
+        }
+
         let animation_enabled = ANIMATION_ENABLED_PER_ANIMATION.lock();
-        let move_enabled = animation_enabled.get(&MovementRenderDispatcher::PREFIX);
+        let move_enabled = animation_enabled.get(&GhostDispatcher::PREFIX);
 
         if move_enabled.is_some_and(|enabled| *enabled)
             || ANIMATION_ENABLED_GLOBAL.load(Ordering::SeqCst)
@@ -464,20 +472,20 @@ impl Window {
             let duration = Duration::from_millis(
                 *ANIMATION_DURATION_PER_ANIMATION
                     .lock()
-                    .get(&MovementRenderDispatcher::PREFIX)
+                    .get(&GhostDispatcher::PREFIX)
                     .unwrap_or(&ANIMATION_DURATION_GLOBAL.load(Ordering::SeqCst)),
             );
             let style = *ANIMATION_STYLE_PER_ANIMATION
                 .lock()
-                .get(&MovementRenderDispatcher::PREFIX)
+                .get(&GhostDispatcher::PREFIX)
                 .unwrap_or(&ANIMATION_STYLE_GLOBAL.lock());
 
             let render_dispatcher =
-                MovementRenderDispatcher::new(self.hwnd, window_rect, *layout, top, style);
+                GhostDispatcher::new(self.hwnd, window_rect, *layout, top, style);
 
             AnimationEngine::animate(render_dispatcher, duration)
         } else {
-            WindowsApi::position_window(self.hwnd, layout, top)
+            WindowsApi::position_window(self.hwnd, layout, top, true)
         }
     }
 
@@ -494,16 +502,27 @@ impl Window {
     }
 
     pub fn hide_with_border(self, hide_border: bool) {
+        // a workspace that is sliding out hides its windows itself, when their
+        // ghosts are up
+        if transition::is_exiting(self.hwnd) {
+            return;
+        }
+
         let mut programmatically_hidden_hwnds = HIDDEN_HWNDS.lock();
         if !programmatically_hidden_hwnds.contains(&self.hwnd) {
             programmatically_hidden_hwnds.push(self.hwnd);
         }
 
         let hiding_behaviour = HIDING_BEHAVIOUR.lock();
+
+        #[allow(deprecated)]
         match *hiding_behaviour {
             HidingBehaviour::Hide => WindowsApi::hide_window(self.hwnd),
             HidingBehaviour::Minimize => WindowsApi::minimize_window(self.hwnd),
-            HidingBehaviour::Cloak => SetCloak(self.hwnd(), 1, 2),
+            HidingBehaviour::Cloak => {
+                SetCloak(self.hwnd(), 1, 2);
+                cloaked::record(&programmatically_hidden_hwnds);
+            }
         }
         if hide_border {
             border_manager::hide_border(self.hwnd);
@@ -515,6 +534,12 @@ impl Window {
     }
 
     pub fn restore_with_border(self, restore_border: bool) {
+        // a workspace that is sliding in shows its windows itself, when they have
+        // got there
+        if transition::is_entering(self.hwnd) {
+            return;
+        }
+
         let mut programmatically_hidden_hwnds = HIDDEN_HWNDS.lock();
         if let Some(idx) = programmatically_hidden_hwnds
             .iter()
@@ -524,11 +549,16 @@ impl Window {
         }
 
         let hiding_behaviour = HIDING_BEHAVIOUR.lock();
+
+        #[allow(deprecated)]
         match *hiding_behaviour {
             HidingBehaviour::Hide | HidingBehaviour::Minimize => {
                 WindowsApi::restore_window(self.hwnd);
             }
-            HidingBehaviour::Cloak => SetCloak(self.hwnd(), 1, 0),
+            HidingBehaviour::Cloak => {
+                SetCloak(self.hwnd(), 1, 0);
+                cloaked::record(&programmatically_hidden_hwnds);
+            }
         }
         if restore_border {
             border_manager::show_border(self.hwnd);
@@ -546,7 +576,7 @@ impl Window {
         }
     }
 
-    pub fn close(self) -> Result<()> {
+    pub fn close(self) -> eyre::Result<()> {
         WindowsApi::close_window(self.hwnd)
     }
 
@@ -574,17 +604,24 @@ impl Window {
         WindowsApi::unmaximize_window(self.hwnd);
     }
 
-    pub fn focus(self, mouse_follows_focus: bool) -> Result<()> {
-        // If the target window is already focused, do nothing.
-        if let Ok(ihwnd) = WindowsApi::foreground_window() {
-            if ihwnd == self.hwnd {
-                // Center cursor in Window
-                if mouse_follows_focus {
-                    WindowsApi::center_cursor_in_rect(&WindowsApi::window_rect(self.hwnd)?)?;
-                }
+    pub fn focus(self, mouse_follows_focus: bool) -> eyre::Result<()> {
+        // Focusing a window that is hidden shows it, which is not for it to be
+        // when it is yet to slide in: it is focused when its animation shows it
+        if transition::is_entering(self.hwnd) {
+            transition::focus_when_shown(self.hwnd, mouse_follows_focus);
+            return Ok(());
+        }
 
-                return Ok(());
+        // If the target window is already focused, do nothing.
+        if let Ok(ihwnd) = WindowsApi::foreground_window()
+            && ihwnd == self.hwnd
+        {
+            // Center cursor in Window
+            if mouse_follows_focus {
+                WindowsApi::center_cursor_in_rect(&WindowsApi::window_rect(self.hwnd)?)?;
             }
+
+            return Ok(());
         }
 
         WindowsApi::raise_and_focus_window(self.hwnd)?;
@@ -601,7 +638,7 @@ impl Window {
         WindowsApi::foreground_window().unwrap_or_default() == self.hwnd
     }
 
-    pub fn transparent(self) -> Result<()> {
+    pub fn transparent(self) -> eyre::Result<()> {
         let animation_enabled = ANIMATION_ENABLED_PER_ANIMATION.lock();
         let transparent_enabled = animation_enabled.get(&TransparencyRenderDispatcher::PREFIX);
 
@@ -639,7 +676,7 @@ impl Window {
         }
     }
 
-    pub fn opaque(self) -> Result<()> {
+    pub fn opaque(self) -> eyre::Result<()> {
         let animation_enabled = ANIMATION_ENABLED_PER_ANIMATION.lock();
         let transparent_enabled = animation_enabled.get(&TransparencyRenderDispatcher::PREFIX);
 
@@ -674,49 +711,49 @@ impl Window {
         }
     }
 
-    pub fn set_accent(self, colour: u32) -> Result<()> {
+    pub fn set_accent(self, colour: u32) -> eyre::Result<()> {
         WindowsApi::set_window_accent(self.hwnd, Some(colour))
     }
 
-    pub fn remove_accent(self) -> Result<()> {
+    pub fn remove_accent(self) -> eyre::Result<()> {
         WindowsApi::set_window_accent(self.hwnd, None)
     }
 
     #[cfg(target_pointer_width = "64")]
-    pub fn update_style(self, style: &WindowStyle) -> Result<()> {
+    pub fn update_style(self, style: &WindowStyle) -> eyre::Result<()> {
         WindowsApi::update_style(self.hwnd, isize::try_from(style.bits())?)
     }
 
     #[cfg(target_pointer_width = "32")]
-    pub fn update_style(self, style: &WindowStyle) -> Result<()> {
+    pub fn update_style(self, style: &WindowStyle) -> eyre::Result<()> {
         WindowsApi::update_style(self.hwnd, i32::try_from(style.bits())?)
     }
 
     #[cfg(target_pointer_width = "64")]
-    pub fn update_ex_style(self, style: &ExtendedWindowStyle) -> Result<()> {
+    pub fn update_ex_style(self, style: &ExtendedWindowStyle) -> eyre::Result<()> {
         WindowsApi::update_ex_style(self.hwnd, isize::try_from(style.bits())?)
     }
 
     #[cfg(target_pointer_width = "32")]
-    pub fn update_ex_style(self, style: &ExtendedWindowStyle) -> Result<()> {
+    pub fn update_ex_style(self, style: &ExtendedWindowStyle) -> eyre::Result<()> {
         WindowsApi::update_ex_style(self.hwnd, i32::try_from(style.bits())?)
     }
 
-    pub fn style(self) -> Result<WindowStyle> {
+    pub fn style(self) -> eyre::Result<WindowStyle> {
         let bits = u32::try_from(WindowsApi::gwl_style(self.hwnd)?)?;
         Ok(WindowStyle::from_bits_truncate(bits))
     }
 
-    pub fn ex_style(self) -> Result<ExtendedWindowStyle> {
+    pub fn ex_style(self) -> eyre::Result<ExtendedWindowStyle> {
         let bits = u32::try_from(WindowsApi::gwl_ex_style(self.hwnd)?)?;
         Ok(ExtendedWindowStyle::from_bits_truncate(bits))
     }
 
-    pub fn title(self) -> Result<String> {
+    pub fn title(self) -> eyre::Result<String> {
         WindowsApi::window_text_w(self.hwnd)
     }
 
-    pub fn path(self) -> Result<String> {
+    pub fn path(self) -> eyre::Result<String> {
         let (process_id, _) = WindowsApi::window_thread_process_id(self.hwnd);
         let handle = WindowsApi::process_handle(process_id)?;
         let path = WindowsApi::exe_path(handle);
@@ -724,7 +761,7 @@ impl Window {
         path
     }
 
-    pub fn exe(self) -> Result<String> {
+    pub fn exe(self) -> eyre::Result<String> {
         let (process_id, _) = WindowsApi::window_thread_process_id(self.hwnd);
         let handle = WindowsApi::process_handle(process_id)?;
         let exe = WindowsApi::exe(handle);
@@ -737,11 +774,11 @@ impl Window {
         process_id
     }
 
-    pub fn class(self) -> Result<String> {
+    pub fn class(self) -> eyre::Result<String> {
         WindowsApi::real_window_class_w(self.hwnd)
     }
 
-    pub fn is_cloaked(self) -> Result<bool> {
+    pub fn is_cloaked(self) -> eyre::Result<bool> {
         WindowsApi::is_window_cloaked(self.hwnd)
     }
 
@@ -749,14 +786,14 @@ impl Window {
         WindowsApi::is_window(self.hwnd)
     }
 
-    pub fn remove_title_bar(self) -> Result<()> {
+    pub fn remove_title_bar(self) -> eyre::Result<()> {
         let mut style = self.style()?;
         style.remove(WindowStyle::CAPTION);
         style.remove(WindowStyle::THICKFRAME);
         self.update_style(&style)
     }
 
-    pub fn add_title_bar(self) -> Result<()> {
+    pub fn add_title_bar(self) -> eyre::Result<()> {
         let mut style = self.style()?;
         style.insert(WindowStyle::CAPTION);
         style.insert(WindowStyle::THICKFRAME);
@@ -767,7 +804,7 @@ impl Window {
     /// it. Use raise_and_focus_window to activate and focus a window.
     /// It also checks if there is a border attached to this window and if it is
     /// it raises it as well.
-    pub fn raise(self) -> Result<()> {
+    pub fn raise(self) -> eyre::Result<()> {
         WindowsApi::raise_window(self.hwnd)?;
         if let Some(border_info) = crate::border_manager::window_border(self.hwnd) {
             WindowsApi::raise_window(border_info.border_hwnd)?;
@@ -779,7 +816,7 @@ impl Window {
     /// it.
     /// It also checks if there is a border attached to this window and if it is
     /// it lowers it as well.
-    pub fn lower(self) -> Result<()> {
+    pub fn lower(self) -> eyre::Result<()> {
         WindowsApi::lower_window(self.hwnd)?;
         if let Some(border_info) = crate::border_manager::window_border(self.hwnd) {
             WindowsApi::lower_window(border_info.border_hwnd)?;
@@ -792,7 +829,7 @@ impl Window {
         self,
         event: Option<WindowManagerEvent>,
         debug: &mut RuleDebug,
-    ) -> Result<bool> {
+    ) -> eyre::Result<bool> {
         if !self.is_window() {
             return Ok(false);
         }
@@ -825,13 +862,13 @@ impl Window {
 
         let mut allow_cloaked = false;
 
-        if let Some(event) = event {
-            if matches!(
+        if let Some(event) = event
+            && matches!(
                 event,
                 WindowManagerEvent::Hide(_, _) | WindowManagerEvent::Cloak(_, _)
-            ) {
-                allow_cloaked = true;
-            }
+            )
+        {
+            allow_cloaked = true;
         }
 
         debug.allow_cloaked = allow_cloaked;
@@ -1312,31 +1349,31 @@ pub fn should_act_individual(
         },
         Some(MatchingStrategy::Regex) => match identifier.kind {
             ApplicationIdentifier::Title => {
-                if let Some(re) = regex_identifiers.get(&identifier.id) {
-                    if re.is_match(title) {
-                        should_act = true;
-                    }
+                if let Some(re) = regex_identifiers.get(&identifier.id)
+                    && re.is_match(title)
+                {
+                    should_act = true;
                 }
             }
             ApplicationIdentifier::Class => {
-                if let Some(re) = regex_identifiers.get(&identifier.id) {
-                    if re.is_match(class) {
-                        should_act = true;
-                    }
+                if let Some(re) = regex_identifiers.get(&identifier.id)
+                    && re.is_match(class)
+                {
+                    should_act = true;
                 }
             }
             ApplicationIdentifier::Exe => {
-                if let Some(re) = regex_identifiers.get(&identifier.id) {
-                    if re.is_match(exe_name) {
-                        should_act = true;
-                    }
+                if let Some(re) = regex_identifiers.get(&identifier.id)
+                    && re.is_match(exe_name)
+                {
+                    should_act = true;
                 }
             }
             ApplicationIdentifier::Path => {
-                if let Some(re) = regex_identifiers.get(&identifier.id) {
-                    if re.is_match(path) {
-                        should_act = true;
-                    }
+                if let Some(re) = regex_identifiers.get(&identifier.id)
+                    && re.is_match(path)
+                {
+                    should_act = true;
                 }
             }
         },

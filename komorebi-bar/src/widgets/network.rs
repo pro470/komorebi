@@ -1,62 +1,121 @@
+use crate::bar::Alignment;
 use crate::config::LabelPrefix;
 use crate::render::RenderConfig;
 use crate::selected_frame::SelectableFrame;
 use crate::widgets::widget::BarWidget;
-use eframe::egui::text::LayoutJob;
 use eframe::egui::Align;
+use eframe::egui::Color32;
 use eframe::egui::Context;
 use eframe::egui::Label;
 use eframe::egui::TextFormat;
 use eframe::egui::Ui;
+use eframe::egui::text::LayoutJob;
 use num_derive::FromPrimitive;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use sysinfo::Networks;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Network widget configuration
 pub struct NetworkConfig {
     /// Enable the Network widget
     pub enable: bool,
-    /// Show total data transmitted
-    pub show_total_data_transmitted: bool,
-    /// Show network activity
-    pub show_network_activity: bool,
+    /// Show total received and transmitted activity
+    #[serde(alias = "show_total_data_transmitted")]
+    pub show_total_activity: bool,
+    /// Show received and transmitted activity
+    #[serde(alias = "show_network_activity")]
+    pub show_activity: bool,
     /// Show default interface
     pub show_default_interface: Option<bool>,
-    /// Characters to reserve for network activity data
-    pub network_activity_fill_characters: Option<usize>,
-    /// Data refresh interval (default: 10 seconds)
+    /// Default interface options: whether to show the friendly name, IPv4 or IPv6 address
+    pub default_interface_options: Option<DefaultInterfaceConfig>,
+    /// Characters to reserve for received and transmitted activity
+    #[serde(alias = "network_activity_fill_characters")]
+    pub activity_left_padding: Option<usize>,
+    /// Data refresh interval in seconds
+    #[cfg_attr(feature = "schemars", schemars(extend("default" = 10)))]
     pub data_refresh_interval: Option<u64>,
     /// Display label prefix
     pub label_prefix: Option<LabelPrefix>,
+    /// Select when the value is over a limit (1MiB is 1048576 bytes (1024*1024))
+    pub auto_select: Option<NetworkSelectConfig>,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Network select configuration
+pub struct NetworkSelectConfig {
+    /// Select the total received data when it's over this value
+    pub total_received_over: Option<u64>,
+    /// Select the total transmitted data when it's over this value
+    pub total_transmitted_over: Option<u64>,
+    /// Select the received data when it's over this value
+    pub received_over: Option<u64>,
+    /// Select the transmitted data when it's over this value
+    pub transmitted_over: Option<u64>,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Which IP address to show for the default interface
+pub enum InterfaceDisplayType {
+    #[default]
+    FriendlyName,
+    Ipv4,
+    Ipv6,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Default interface configuration
+pub struct DefaultInterfaceConfig {
+    #[serde(default)]
+    pub display_type: InterfaceDisplayType,
 }
 
 impl From<NetworkConfig> for Network {
     fn from(value: NetworkConfig) -> Self {
-        let data_refresh_interval = value.data_refresh_interval.unwrap_or(10);
+        let default_refresh_interval = 10;
+        let data_refresh_interval = value
+            .data_refresh_interval
+            .unwrap_or(default_refresh_interval);
 
         Self {
             enable: value.enable,
-            show_total_activity: value.show_total_data_transmitted,
-            show_activity: value.show_network_activity,
+            show_total_activity: value.show_total_activity,
+            show_activity: value.show_activity,
             show_default_interface: value.show_default_interface.unwrap_or(true),
-            networks_network_activity: Networks::new_with_refreshed_list(),
-            default_interface: String::new(),
+            default_interface_options: value.default_interface_options,
+            networks_network_activity: Arc::new(Mutex::new(Networks::new_with_refreshed_list())),
+            default_interface: Arc::new(Mutex::new(String::new())),
+            interface_generation: Arc::new(AtomicU64::new(0)),
+            default_refresh_interval,
             data_refresh_interval,
             label_prefix: value.label_prefix.unwrap_or(LabelPrefix::Icon),
-            network_activity_fill_characters: value
-                .network_activity_fill_characters
-                .unwrap_or_default(),
-            last_state_total_activity: vec![],
-            last_state_activity: vec![],
-            last_updated_network_activity: Instant::now()
-                .checked_sub(Duration::from_secs(data_refresh_interval))
+            auto_select: value.auto_select,
+            activity_left_padding: value.activity_left_padding.unwrap_or_default(),
+            last_update_request_default_interface: Instant::now()
+                .checked_sub(Duration::from_secs(default_refresh_interval))
                 .unwrap(),
+            last_state_total_activity: Arc::new(Mutex::new(vec![])),
+            last_state_activity: Arc::new(Mutex::new(vec![])),
+            last_update_request_network_activity: Arc::new(Mutex::new(
+                Instant::now()
+                    .checked_sub(Duration::from_secs(data_refresh_interval))
+                    .unwrap(),
+            )),
+            activity_generation: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -66,177 +125,279 @@ pub struct Network {
     pub show_total_activity: bool,
     pub show_activity: bool,
     pub show_default_interface: bool,
-    networks_network_activity: Networks,
+    pub default_interface_options: Option<DefaultInterfaceConfig>,
+    networks_network_activity: Arc<Mutex<Networks>>,
+    default_refresh_interval: u64,
     data_refresh_interval: u64,
     label_prefix: LabelPrefix,
-    default_interface: String,
-    last_state_total_activity: Vec<NetworkReading>,
-    last_state_activity: Vec<NetworkReading>,
-    last_updated_network_activity: Instant,
-    network_activity_fill_characters: usize,
+    auto_select: Option<NetworkSelectConfig>,
+    default_interface: Arc<Mutex<String>>,
+    interface_generation: Arc<AtomicU64>,
+    last_update_request_default_interface: Instant,
+    activity_generation: Arc<AtomicU64>,
+    last_state_activity: Arc<Mutex<Vec<NetworkReading>>>,
+    last_state_total_activity: Arc<Mutex<Vec<NetworkReading>>>,
+    last_update_request_network_activity: Arc<Mutex<Instant>>,
+    activity_left_padding: usize,
 }
 
 impl Network {
-    fn default_interface(&mut self) {
-        if let Ok(interface) = netdev::get_default_interface() {
-            if let Some(friendly_name) = &interface.friendly_name {
-                self.default_interface.clone_from(friendly_name);
+    fn update_default_interface_async(&mut self) {
+        let gen_ = self.interface_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let gen_arc = Arc::clone(&self.interface_generation);
+        let iface_arc = Arc::clone(&self.default_interface);
+        let default_interface_options = self.default_interface_options;
+
+        thread::spawn(move || {
+            if let Ok(interface) = netdev::get_default_interface() {
+                // Determine what to show based on the configuration
+                let display_type = default_interface_options
+                    .map(|config| config.display_type)
+                    .unwrap_or(InterfaceDisplayType::FriendlyName);
+
+                let value_to_show = match display_type {
+                    InterfaceDisplayType::FriendlyName => interface
+                        .friendly_name
+                        .clone()
+                        .unwrap_or_else(|| "Unknown Interface".to_string()),
+                    InterfaceDisplayType::Ipv4 => interface
+                        .ipv4
+                        .first()
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_else(|| "No IPv4".to_string()),
+                    InterfaceDisplayType::Ipv6 => interface
+                        .ipv6
+                        .first()
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_else(|| "No IPv6".to_string()),
+                };
+
+                // Only update if this is the latest request
+                if gen_ == gen_arc.load(Ordering::SeqCst)
+                    && let Ok(mut iface) = iface_arc.lock()
+                {
+                    *iface = value_to_show;
+                }
             }
-        }
+        });
     }
 
-    fn network_activity(&mut self) -> (Vec<NetworkReading>, Vec<NetworkReading>) {
-        let mut activity = self.last_state_activity.clone();
-        let mut total_activity = self.last_state_total_activity.clone();
+    fn default_interface(&mut self) -> String {
+        let current = self.default_interface.lock().unwrap().clone();
         let now = Instant::now();
 
-        if now.duration_since(self.last_updated_network_activity)
-            > Duration::from_secs(self.data_refresh_interval)
+        if now.duration_since(self.last_update_request_default_interface)
+            > Duration::from_secs(self.default_refresh_interval)
         {
-            activity.clear();
-            total_activity.clear();
+            self.last_update_request_default_interface = now;
+            self.update_default_interface_async();
+        }
 
-            if let Ok(interface) = netdev::get_default_interface() {
-                if let Some(friendly_name) = &interface.friendly_name {
-                    self.default_interface.clone_from(friendly_name);
+        current
+    }
 
-                    self.networks_network_activity.refresh(true);
+    fn update_network_activity_async(&mut self) {
+        let gen_ = self.activity_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let gen_arc = Arc::clone(&self.activity_generation);
+        let activity_arc = Arc::clone(&self.last_state_activity);
+        let total_activity_arc = Arc::clone(&self.last_state_total_activity);
+        let data_refresh_interval = self.data_refresh_interval;
+        let show_activity = self.show_activity;
+        let show_total_activity = self.show_total_activity;
+        let networks_network_activity_arc = Arc::clone(&self.networks_network_activity);
 
-                    for (interface_name, data) in &self.networks_network_activity {
-                        if friendly_name.eq(interface_name) {
-                            if self.show_activity {
-                                activity.push(NetworkReading::new(
-                                    NetworkReadingFormat::Speed,
-                                    Self::to_pretty_bytes(
-                                        data.received(),
-                                        self.data_refresh_interval,
-                                    ),
-                                    Self::to_pretty_bytes(
-                                        data.transmitted(),
-                                        self.data_refresh_interval,
-                                    ),
-                                ));
-                            }
+        thread::spawn(move || {
+            let mut activity = Vec::new();
+            let mut total_activity = Vec::new();
 
-                            if self.show_total_activity {
-                                total_activity.push(NetworkReading::new(
-                                    NetworkReadingFormat::Total,
-                                    Self::to_pretty_bytes(data.total_received(), 1),
-                                    Self::to_pretty_bytes(data.total_transmitted(), 1),
-                                ))
-                            }
+            if let Ok(interface) = netdev::get_default_interface()
+                && let Some(friendly_name) = &interface.friendly_name
+                && let Ok(mut networks) = networks_network_activity_arc.lock()
+            {
+                networks.refresh(true);
+
+                for (interface_name, data) in &*networks {
+                    if friendly_name.eq(interface_name) {
+                        if show_activity {
+                            let received =
+                                Network::to_pretty_bytes(data.received(), data_refresh_interval);
+                            let transmitted =
+                                Network::to_pretty_bytes(data.transmitted(), data_refresh_interval);
+
+                            activity.push(NetworkReading::new(
+                                NetworkReadingFormat::Speed,
+                                ReadingValue::from(received),
+                                ReadingValue::from(transmitted),
+                            ));
+                        }
+
+                        if show_total_activity {
+                            let total_received = Network::to_pretty_bytes(data.total_received(), 1);
+                            let total_transmitted =
+                                Network::to_pretty_bytes(data.total_transmitted(), 1);
+
+                            total_activity.push(NetworkReading::new(
+                                NetworkReadingFormat::Total,
+                                ReadingValue::from(total_received),
+                                ReadingValue::from(total_transmitted),
+                            ));
                         }
                     }
                 }
             }
 
-            self.last_state_activity.clone_from(&activity);
-            self.last_state_total_activity.clone_from(&total_activity);
-            self.last_updated_network_activity = now;
+            // Only update if this is the latest request
+            if gen_ == gen_arc.load(Ordering::SeqCst) {
+                if let Ok(mut act) = activity_arc.lock() {
+                    *act = activity;
+                }
+                if let Ok(mut tot) = total_activity_arc.lock() {
+                    *tot = total_activity;
+                }
+            }
+        });
+    }
+
+    fn network_activity(&mut self) -> (Vec<NetworkReading>, Vec<NetworkReading>) {
+        let now = Instant::now();
+        let should_update = {
+            let last_update_request = self.last_update_request_network_activity.lock().unwrap();
+            now.duration_since(*last_update_request)
+                > Duration::from_secs(self.data_refresh_interval)
+        };
+
+        if should_update {
+            {
+                let mut last_updated = self.last_update_request_network_activity.lock().unwrap();
+                *last_updated = now;
+            }
+            self.update_network_activity_async();
         }
 
+        self.get_network_activity()
+    }
+
+    fn get_network_activity(&self) -> (Vec<NetworkReading>, Vec<NetworkReading>) {
+        let activity = self.last_state_activity.lock().unwrap().clone();
+        let total_activity = self.last_state_total_activity.lock().unwrap().clone();
         (activity, total_activity)
     }
 
-    fn reading_to_label(
+    fn reading_to_labels(
         &self,
+        select_received: bool,
+        select_transmitted: bool,
         ctx: &Context,
-        reading: NetworkReading,
+        reading: &NetworkReading,
         config: RenderConfig,
-    ) -> Label {
+    ) -> (Label, Label) {
         let (text_down, text_up) = match self.label_prefix {
             LabelPrefix::None | LabelPrefix::Icon => match reading.format {
                 NetworkReadingFormat::Speed => (
                     format!(
                         "{: >width$}/s ",
-                        reading.received_text,
-                        width = self.network_activity_fill_characters
+                        reading.received.pretty,
+                        width = self.activity_left_padding
                     ),
                     format!(
                         "{: >width$}/s",
-                        reading.transmitted_text,
-                        width = self.network_activity_fill_characters
+                        reading.transmitted.pretty,
+                        width = self.activity_left_padding
                     ),
                 ),
                 NetworkReadingFormat::Total => (
-                    format!("{} ", reading.received_text),
-                    reading.transmitted_text,
+                    format!("{} ", reading.received.pretty),
+                    reading.transmitted.pretty.clone(),
                 ),
             },
             LabelPrefix::Text | LabelPrefix::IconAndText => match reading.format {
                 NetworkReadingFormat::Speed => (
                     format!(
                         "DOWN: {: >width$}/s ",
-                        reading.received_text,
-                        width = self.network_activity_fill_characters
+                        reading.received.pretty,
+                        width = self.activity_left_padding
                     ),
                     format!(
                         "UP: {: >width$}/s",
-                        reading.transmitted_text,
-                        width = self.network_activity_fill_characters
+                        reading.transmitted.pretty,
+                        width = self.activity_left_padding
                     ),
                 ),
                 NetworkReadingFormat::Total => (
-                    format!("\u{2211}DOWN: {}/s ", reading.received_text),
-                    format!("\u{2211}UP: {}/s", reading.transmitted_text),
+                    format!("\u{2211}DOWN: {}/s ", reading.received.pretty),
+                    format!("\u{2211}UP: {}/s", reading.transmitted.pretty),
                 ),
             },
         };
 
-        let icon_format = TextFormat::simple(
-            config.icon_font_id.clone(),
-            ctx.style().visuals.selection.stroke.color,
-        );
-        let text_format = TextFormat {
-            font_id: config.text_font_id.clone(),
-            color: ctx.style().visuals.text_color(),
-            valign: Align::Center,
-            ..Default::default()
-        };
+        let auto_text_color_received = config.auto_select_text.filter(|_| select_received);
+        let auto_text_color_transmitted = config.auto_select_text.filter(|_| select_transmitted);
 
         // icon
-        let mut layout_job = LayoutJob::simple(
+        let mut layout_job_down = LayoutJob::simple(
             match self.label_prefix {
                 LabelPrefix::Icon | LabelPrefix::IconAndText => {
-                    egui_phosphor::regular::ARROW_FAT_DOWN.to_string()
+                    if select_received {
+                        egui_phosphor::regular::ARROW_FAT_LINES_DOWN.to_string()
+                    } else {
+                        egui_phosphor::regular::ARROW_FAT_DOWN.to_string()
+                    }
                 }
                 LabelPrefix::None | LabelPrefix::Text => String::new(),
             },
-            icon_format.font_id.clone(),
-            icon_format.color,
+            config.icon_font_id.clone(),
+            auto_text_color_received.unwrap_or(ctx.style().visuals.selection.stroke.color),
             100.0,
         );
 
         // text
-        layout_job.append(
+        layout_job_down.append(
             &text_down,
             ctx.style().spacing.item_spacing.x,
-            text_format.clone(),
+            TextFormat {
+                font_id: config.text_font_id.clone(),
+                color: auto_text_color_received.unwrap_or(ctx.style().visuals.text_color()),
+                valign: Align::Center,
+                ..Default::default()
+            },
         );
 
         // icon
-        layout_job.append(
-            &match self.label_prefix {
+        let mut layout_job_up = LayoutJob::simple(
+            match self.label_prefix {
                 LabelPrefix::Icon | LabelPrefix::IconAndText => {
-                    egui_phosphor::regular::ARROW_FAT_UP.to_string()
+                    if select_transmitted {
+                        egui_phosphor::regular::ARROW_FAT_LINES_UP.to_string()
+                    } else {
+                        egui_phosphor::regular::ARROW_FAT_UP.to_string()
+                    }
                 }
                 LabelPrefix::None | LabelPrefix::Text => String::new(),
             },
-            0.0,
-            icon_format.clone(),
+            config.icon_font_id.clone(),
+            auto_text_color_transmitted.unwrap_or(ctx.style().visuals.selection.stroke.color),
+            100.0,
         );
 
         // text
-        layout_job.append(
+        layout_job_up.append(
             &text_up,
             ctx.style().spacing.item_spacing.x,
-            text_format.clone(),
+            TextFormat {
+                font_id: config.text_font_id.clone(),
+                color: auto_text_color_transmitted.unwrap_or(ctx.style().visuals.text_color()),
+                valign: Align::Center,
+                ..Default::default()
+            },
         );
 
-        Label::new(layout_job).selectable(false)
+        (
+            Label::new(layout_job_down).selectable(false),
+            Label::new(layout_job_up).selectable(false),
+        )
     }
 
-    fn to_pretty_bytes(input_in_bytes: u64, timespan_in_s: u64) -> String {
+    fn to_pretty_bytes(input_in_bytes: u64, timespan_in_s: u64) -> (u64, String) {
         let input = input_in_bytes as f32 / timespan_in_s as f32;
         let mut magnitude = input.log(1024f32) as u32;
 
@@ -248,10 +409,29 @@ impl Network {
         let base: Option<DataUnit> = num::FromPrimitive::from_u32(magnitude);
         let result = input / ((1u64) << (magnitude * 10)) as f32;
 
-        match base {
-            Some(DataUnit::B) => format!("{result:.1} B"),
-            Some(unit) => format!("{result:.1} {unit}iB"),
-            None => String::from("Unknown data unit"),
+        (
+            input as u64,
+            match base {
+                Some(DataUnit::B) => format!("{result:.1} B"),
+                Some(unit) => format!("{result:.1} {unit}iB"),
+                None => String::from("Unknown data unit"),
+            },
+        )
+    }
+
+    fn show_frame<R>(
+        &self,
+        selected: bool,
+        auto_focus_fill: Option<Color32>,
+        ui: &mut Ui,
+        add_contents: impl FnOnce(&mut Ui) -> R,
+    ) {
+        if SelectableFrame::new_auto(selected, auto_focus_fill)
+            .show(ui, add_contents)
+            .clicked()
+            && let Err(error) = Command::new("cmd.exe").args(["/C", "ncpa"]).spawn()
+        {
+            eprintln!("{error}");
         }
     }
 }
@@ -259,6 +439,8 @@ impl Network {
 impl BarWidget for Network {
     fn render(&mut self, ctx: &Context, ui: &mut Ui, config: &mut RenderConfig) {
         if self.enable {
+            let is_reversed = matches!(config.alignment, Some(Alignment::Right));
+
             // widget spacing: make sure to use the same config to call the apply_on_widget function
             let mut render_config = config.clone();
 
@@ -266,26 +448,111 @@ impl BarWidget for Network {
                 let (activity, total_activity) = self.network_activity();
 
                 if self.show_total_activity {
-                    for reading in total_activity {
-                        render_config.apply_on_widget(true, ui, |ui| {
-                            ui.add(self.reading_to_label(ctx, reading, config.clone()));
+                    for reading in &total_activity {
+                        render_config.apply_on_widget(false, ui, |ui| {
+                            let select_received = self.auto_select.is_some_and(|f| {
+                                f.total_received_over
+                                    .is_some_and(|o| reading.received.value > o)
+                            });
+                            let select_transmitted = self.auto_select.is_some_and(|f| {
+                                f.total_transmitted_over
+                                    .is_some_and(|o| reading.transmitted.value > o)
+                            });
+
+                            let labels = self.reading_to_labels(
+                                select_received,
+                                select_transmitted,
+                                ctx,
+                                reading,
+                                config.clone(),
+                            );
+
+                            if is_reversed {
+                                self.show_frame(
+                                    select_transmitted,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.1),
+                                );
+                                self.show_frame(
+                                    select_received,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.0),
+                                );
+                            } else {
+                                self.show_frame(
+                                    select_received,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.0),
+                                );
+                                self.show_frame(
+                                    select_transmitted,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.1),
+                                );
+                            }
                         });
                     }
                 }
 
                 if self.show_activity {
-                    for reading in activity {
-                        render_config.apply_on_widget(true, ui, |ui| {
-                            ui.add(self.reading_to_label(ctx, reading, config.clone()));
+                    for reading in &activity {
+                        render_config.apply_on_widget(false, ui, |ui| {
+                            let select_received = self.auto_select.is_some_and(|f| {
+                                f.received_over.is_some_and(|o| reading.received.value > o)
+                            });
+                            let select_transmitted = self.auto_select.is_some_and(|f| {
+                                f.transmitted_over
+                                    .is_some_and(|o| reading.transmitted.value > o)
+                            });
+
+                            let labels = self.reading_to_labels(
+                                select_received,
+                                select_transmitted,
+                                ctx,
+                                reading,
+                                config.clone(),
+                            );
+
+                            if is_reversed {
+                                self.show_frame(
+                                    select_transmitted,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.1),
+                                );
+                                self.show_frame(
+                                    select_received,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.0),
+                                );
+                            } else {
+                                self.show_frame(
+                                    select_received,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.0),
+                                );
+                                self.show_frame(
+                                    select_transmitted,
+                                    config.auto_select_fill,
+                                    ui,
+                                    |ui| ui.add(labels.1),
+                                );
+                            }
                         });
                     }
                 }
             }
 
             if self.show_default_interface {
-                self.default_interface();
+                let mut self_default_interface = self.default_interface();
 
-                if !self.default_interface.is_empty() {
+                if !self_default_interface.is_empty() {
                     let mut layout_job = LayoutJob::simple(
                         match self.label_prefix {
                             LabelPrefix::Icon | LabelPrefix::IconAndText => {
@@ -299,11 +566,11 @@ impl BarWidget for Network {
                     );
 
                     if let LabelPrefix::Text | LabelPrefix::IconAndText = self.label_prefix {
-                        self.default_interface.insert_str(0, "NET: ");
+                        self_default_interface.insert_str(0, "NET: ");
                     }
 
                     layout_job.append(
-                        &self.default_interface,
+                        &self_default_interface,
                         10.0,
                         TextFormat {
                             font_id: config.text_font_id.clone(),
@@ -314,15 +581,9 @@ impl BarWidget for Network {
                     );
 
                     render_config.apply_on_widget(false, ui, |ui| {
-                        if SelectableFrame::new(false)
-                            .show(ui, |ui| ui.add(Label::new(layout_job).selectable(false)))
-                            .clicked()
-                        {
-                            if let Err(error) = Command::new("cmd.exe").args(["/C", "ncpa"]).spawn()
-                            {
-                                eprintln!("{}", error)
-                            }
-                        }
+                        self.show_frame(false, None, ui, |ui| {
+                            ui.add(Label::new(layout_job).selectable(false))
+                        });
                     });
                 }
             }
@@ -340,18 +601,37 @@ enum NetworkReadingFormat {
 }
 
 #[derive(Clone)]
+struct ReadingValue {
+    value: u64,
+    pretty: String,
+}
+
+impl From<(u64, String)> for ReadingValue {
+    fn from(value: (u64, String)) -> Self {
+        Self {
+            value: value.0,
+            pretty: value.1,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct NetworkReading {
-    pub format: NetworkReadingFormat,
-    pub received_text: String,
-    pub transmitted_text: String,
+    format: NetworkReadingFormat,
+    received: ReadingValue,
+    transmitted: ReadingValue,
 }
 
 impl NetworkReading {
-    pub fn new(format: NetworkReadingFormat, received: String, transmitted: String) -> Self {
-        NetworkReading {
+    fn new(
+        format: NetworkReadingFormat,
+        received: ReadingValue,
+        transmitted: ReadingValue,
+    ) -> Self {
+        Self {
             format,
-            received_text: received,
-            transmitted_text: transmitted,
+            received,
+            transmitted,
         }
     }
 }
@@ -371,6 +651,6 @@ enum DataUnit {
 
 impl fmt::Display for DataUnit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }

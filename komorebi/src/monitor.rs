@@ -1,76 +1,58 @@
-use bevy_ecs::component::Component;
-use bevy_reflect::Reflect;
-use color_eyre::eyre::anyhow;
-use color_eyre::eyre::bail;
-use color_eyre::Result;
-use getset::CopyGetters;
-use getset::Getters;
-use getset::MutGetters;
-use getset::Setters;
-use serde::Deserialize;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 
+use color_eyre::eyre;
+use color_eyre::eyre::OptionExt;
+use color_eyre::eyre::bail;
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::border_manager::BORDER_ENABLED;
+use crate::border_manager::BORDER_OFFSET;
+use crate::border_manager::BORDER_WIDTH;
 use crate::core::Rect;
 
+use crate::DEFAULT_CONTAINER_PADDING;
+use crate::DEFAULT_WORKSPACE_PADDING;
+use crate::DefaultLayout;
+use crate::FloatingLayerBehaviour;
+use crate::Layout;
+use crate::OperationDirection;
+use crate::Wallpaper;
+use crate::WindowsApi;
 use crate::container::Container;
 use crate::ring::Ring;
 use crate::workspace::Workspace;
+use crate::workspace::WorkspaceGlobals;
 use crate::workspace::WorkspaceLayer;
-use crate::DefaultLayout;
-use crate::Layout;
-use crate::OperationDirection;
-use crate::WindowsApi;
-use crate::DEFAULT_CONTAINER_PADDING;
-use crate::DEFAULT_WORKSPACE_PADDING;
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Getters,
-    CopyGetters,
-    MutGetters,
-    Setters,
-    PartialEq,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq
     Reflect,
     Component,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Monitor {
-    #[getset(get_copy = "pub", set = "pub")]
     pub id: isize,
-    #[getset(get = "pub", set = "pub")]
     pub name: String,
-    #[getset(get = "pub", set = "pub")]
     pub device: String,
-    #[getset(get = "pub", set = "pub")]
     pub device_id: String,
-    #[getset(get = "pub", set = "pub")]
     pub serial_number_id: Option<String>,
-    #[getset(get = "pub", set = "pub")]
     pub size: Rect,
-    #[getset(get = "pub", set = "pub")]
     pub work_area_size: Rect,
-    #[getset(get_copy = "pub", set = "pub")]
     pub work_area_offset: Option<Rect>,
-    #[getset(get_copy = "pub", set = "pub")]
     pub window_based_work_area_offset: Option<Rect>,
-    #[getset(get_copy = "pub", set = "pub")]
     pub window_based_work_area_offset_limit: isize,
     pub workspaces: Ring<Workspace>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[getset(get_copy = "pub", set = "pub")]
     pub last_focused_workspace: Option<usize>,
-    #[getset(get_mut = "pub")]
     pub workspace_names: HashMap<usize, String>,
-    #[getset(get_copy = "pub", set = "pub")]
     pub container_padding: Option<i32>,
-    #[getset(get_copy = "pub", set = "pub")]
     pub workspace_padding: Option<i32>,
+    pub wallpaper: Option<Wallpaper>,
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
 }
 
 impl_ring_elements!(Monitor, Workspace);
@@ -126,6 +108,8 @@ pub fn new(
         workspace_names: HashMap::default(),
         container_padding: None,
         workspace_padding: None,
+        wallpaper: None,
+        floating_layer_behaviour: None,
     }
 }
 
@@ -167,20 +151,34 @@ impl Monitor {
             workspace_names: Default::default(),
             container_padding: None,
             workspace_padding: None,
+            wallpaper: None,
+            floating_layer_behaviour: None,
         }
     }
 
     pub fn focused_workspace_name(&self) -> Option<String> {
         self.focused_workspace()
-            .map(|w| w.name().clone())
+            .map(|w| w.name.clone())
             .unwrap_or(None)
     }
 
-    pub fn load_focused_workspace(&mut self, mouse_follows_focus: bool) -> Result<()> {
+    pub fn focused_workspace_layout(&self) -> Option<Layout> {
+        self.focused_workspace().and_then(|workspace| {
+            if workspace.tile {
+                Some(workspace.layout.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn load_focused_workspace(&mut self, mouse_follows_focus: bool) -> eyre::Result<()> {
         let focused_idx = self.focused_workspace_idx();
+        let hmonitor = self.id;
+        let monitor_wp = self.wallpaper.clone();
         for (i, workspace) in self.workspaces_mut().iter_mut().enumerate() {
             if i == focused_idx {
-                workspace.restore(mouse_follows_focus)?;
+                workspace.restore(mouse_follows_focus, hmonitor, &monitor_wp)?;
             } else {
                 workspace.hide(None);
             }
@@ -192,46 +190,78 @@ impl Monitor {
     /// Updates the `globals` field of all workspaces
     pub fn update_workspaces_globals(&mut self, offset: Option<Rect>) {
         let container_padding = self
-            .container_padding()
+            .container_padding
             .or(Some(DEFAULT_CONTAINER_PADDING.load(Ordering::SeqCst)));
         let workspace_padding = self
-            .workspace_padding()
+            .workspace_padding
             .or(Some(DEFAULT_WORKSPACE_PADDING.load(Ordering::SeqCst)));
-        let work_area = *self.work_area_size();
-        let offset = self.work_area_offset.or(offset);
-        let window_based_work_area_offset = self.window_based_work_area_offset();
-        let limit = self.window_based_work_area_offset_limit();
+        let (border_width, border_offset) = {
+            let border_enabled = BORDER_ENABLED.load(Ordering::SeqCst);
+            if border_enabled {
+                let border_width = BORDER_WIDTH.load(Ordering::SeqCst);
+                let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
+                (border_width, border_offset)
+            } else {
+                (0, 0)
+            }
+        };
+        let work_area = self.work_area_size;
+        let work_area_offset = self.work_area_offset.or(offset);
+        let window_based_work_area_offset = self.window_based_work_area_offset;
+        let window_based_work_area_offset_limit = self.window_based_work_area_offset_limit;
+        let floating_layer_behaviour = self.floating_layer_behaviour;
 
         for workspace in self.workspaces_mut() {
-            workspace.globals_mut().container_padding = container_padding;
-            workspace.globals_mut().workspace_padding = workspace_padding;
-            workspace.globals_mut().work_area = work_area;
-            workspace.globals_mut().work_area_offset = offset;
-            workspace.globals_mut().window_based_work_area_offset = window_based_work_area_offset;
-            workspace.globals_mut().window_based_work_area_offset_limit = limit;
+            workspace.globals = WorkspaceGlobals {
+                container_padding,
+                workspace_padding,
+                border_width,
+                border_offset,
+                work_area,
+                work_area_offset,
+                window_based_work_area_offset,
+                window_based_work_area_offset_limit,
+                floating_layer_behaviour,
+            }
         }
     }
 
     /// Updates the `globals` field of workspace with index `workspace_idx`
     pub fn update_workspace_globals(&mut self, workspace_idx: usize, offset: Option<Rect>) {
         let container_padding = self
-            .container_padding()
+            .container_padding
             .or(Some(DEFAULT_CONTAINER_PADDING.load(Ordering::SeqCst)));
         let workspace_padding = self
-            .workspace_padding()
+            .workspace_padding
             .or(Some(DEFAULT_WORKSPACE_PADDING.load(Ordering::SeqCst)));
-        let work_area = *self.work_area_size();
-        let offset = self.work_area_offset.or(offset);
-        let window_based_work_area_offset = self.window_based_work_area_offset();
-        let limit = self.window_based_work_area_offset_limit();
+        let (border_width, border_offset) = {
+            let border_enabled = BORDER_ENABLED.load(Ordering::SeqCst);
+            if border_enabled {
+                let border_width = BORDER_WIDTH.load(Ordering::SeqCst);
+                let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
+                (border_width, border_offset)
+            } else {
+                (0, 0)
+            }
+        };
+        let work_area = self.work_area_size;
+        let work_area_offset = self.work_area_offset.or(offset);
+        let window_based_work_area_offset = self.window_based_work_area_offset;
+        let window_based_work_area_offset_limit = self.window_based_work_area_offset_limit;
+        let floating_layer_behaviour = self.floating_layer_behaviour;
 
         if let Some(workspace) = self.workspaces_mut().get_mut(workspace_idx) {
-            workspace.globals_mut().container_padding = container_padding;
-            workspace.globals_mut().workspace_padding = workspace_padding;
-            workspace.globals_mut().work_area = work_area;
-            workspace.globals_mut().work_area_offset = offset;
-            workspace.globals_mut().window_based_work_area_offset = window_based_work_area_offset;
-            workspace.globals_mut().window_based_work_area_offset_limit = limit;
+            workspace.globals = WorkspaceGlobals {
+                container_padding,
+                workspace_padding,
+                border_width,
+                border_offset,
+                work_area,
+                work_area_offset,
+                window_based_work_area_offset,
+                window_based_work_area_offset_limit,
+                floating_layer_behaviour,
+            }
         }
     }
 
@@ -239,14 +269,14 @@ impl Monitor {
         &mut self,
         container: Container,
         workspace_idx: Option<usize>,
-    ) -> Result<()> {
+    ) -> eyre::Result<()> {
         let workspace = if let Some(idx) = workspace_idx {
             self.workspaces_mut()
                 .get_mut(idx)
-                .ok_or_else(|| anyhow!("there is no workspace at index {}", idx))?
+                .ok_or_eyre(format!("there is no workspace at index {idx}"))?
         } else {
             self.focused_workspace_mut()
-                .ok_or_else(|| anyhow!("there is no workspace"))?
+                .ok_or_eyre("there is no workspace")?
         };
 
         workspace.add_container_to_back(container);
@@ -263,31 +293,29 @@ impl Monitor {
         container: Container,
         workspace_idx: Option<usize>,
         direction: OperationDirection,
-    ) -> Result<()> {
+    ) -> eyre::Result<()> {
         let workspace = if let Some(idx) = workspace_idx {
             self.workspaces_mut()
                 .get_mut(idx)
-                .ok_or_else(|| anyhow!("there is no workspace at index {}", idx))?
+                .ok_or_eyre(format!("there is no workspace at index {idx}"))?
         } else {
             self.focused_workspace_mut()
-                .ok_or_else(|| anyhow!("there is no workspace"))?
+                .ok_or_eyre("there is no workspace")?
         };
 
         match direction {
             OperationDirection::Left => {
                 // insert the container into the workspace on the monitor at the back (or rightmost position)
                 // if we are moving across a boundary to the left (back = right side of the target)
-                match workspace.layout() {
+                match workspace.layout {
                     Layout::Default(layout) => match layout {
                         DefaultLayout::RightMainVerticalStack => {
                             workspace.add_container_to_front(container);
                         }
-                        DefaultLayout::UltrawideVerticalStack => {
-                            if workspace.containers().len() == 1 {
-                                workspace.insert_container_at_idx(0, container);
-                            } else {
-                                workspace.add_container_to_back(container);
-                            }
+                        DefaultLayout::UltrawideVerticalStack
+                            if workspace.containers().len() == 1 =>
+                        {
+                            workspace.insert_container_at_idx(0, container);
                         }
                         _ => {
                             workspace.add_container_to_back(container);
@@ -301,18 +329,16 @@ impl Monitor {
             OperationDirection::Right => {
                 // insert the container into the workspace on the monitor at the front (or leftmost position)
                 // if we are moving across a boundary to the right (front = left side of the target)
-                match workspace.layout() {
+                match workspace.layout {
                     Layout::Default(layout) => {
                         let target_index = layout.leftmost_index(workspace.containers().len());
 
                         match layout {
                             DefaultLayout::RightMainVerticalStack
-                            | DefaultLayout::UltrawideVerticalStack => {
-                                if workspace.containers().len() == 1 {
-                                    workspace.add_container_to_back(container);
-                                } else {
-                                    workspace.insert_container_at_idx(target_index, container);
-                                }
+                            | DefaultLayout::UltrawideVerticalStack
+                                if workspace.containers().len() == 1 =>
+                            {
+                                workspace.add_container_to_back(container);
                             }
                             _ => {
                                 workspace.insert_container_at_idx(target_index, container);
@@ -356,7 +382,7 @@ impl Monitor {
     }
 
     pub fn remove_workspaces(&mut self) -> VecDeque<Workspace> {
-        self.workspaces_mut().drain(..).collect()
+        std::mem::take(self.workspaces_mut())
     }
 
     #[tracing::instrument(skip(self))]
@@ -365,12 +391,12 @@ impl Monitor {
         target_workspace_idx: usize,
         follow: bool,
         direction: Option<OperationDirection>,
-    ) -> Result<()> {
+    ) -> eyre::Result<()> {
         let workspace = self
             .focused_workspace_mut()
-            .ok_or_else(|| anyhow!("there is no workspace"))?;
+            .ok_or_eyre("there is no workspace")?;
 
-        if workspace.maximized_window().is_some() {
+        if workspace.maximized_window.is_some() {
             bail!("cannot move native maximized window to another monitor or workspace");
         }
 
@@ -381,24 +407,24 @@ impl Monitor {
             .position(|w| w.hwnd == foreground_hwnd);
 
         if let Some(idx) = floating_window_index {
-            let window = workspace.floating_windows_mut().remove(idx);
+            if let Some(window) = workspace.floating_windows_mut().remove(idx) {
+                let workspaces = self.workspaces_mut();
+                #[allow(clippy::option_if_let_else)]
+                let target_workspace = match workspaces.get_mut(target_workspace_idx) {
+                    None => {
+                        workspaces.resize(target_workspace_idx + 1, Workspace::default());
+                        workspaces.get_mut(target_workspace_idx).unwrap()
+                    }
+                    Some(workspace) => workspace,
+                };
 
-            let workspaces = self.workspaces_mut();
-            #[allow(clippy::option_if_let_else)]
-            let target_workspace = match workspaces.get_mut(target_workspace_idx) {
-                None => {
-                    workspaces.resize(target_workspace_idx + 1, Workspace::default());
-                    workspaces.get_mut(target_workspace_idx).unwrap()
-                }
-                Some(workspace) => workspace,
-            };
-
-            target_workspace.floating_windows_mut().push(window);
-            target_workspace.set_layer(WorkspaceLayer::Floating);
+                target_workspace.floating_windows_mut().push_back(window);
+                target_workspace.layer = WorkspaceLayer::Floating;
+            }
         } else {
             let container = workspace
                 .remove_focused_container()
-                .ok_or_else(|| anyhow!("there is no container"))?;
+                .ok_or_eyre("there is no container")?;
 
             let workspaces = self.workspaces_mut();
 
@@ -411,7 +437,19 @@ impl Monitor {
                 Some(workspace) => workspace,
             };
 
-            target_workspace.set_layer(WorkspaceLayer::Tiling);
+            if target_workspace.monocle_container.is_some() {
+                for container in target_workspace.containers_mut() {
+                    container.restore();
+                }
+
+                for window in target_workspace.floating_windows_mut() {
+                    window.restore();
+                }
+
+                target_workspace.reintegrate_monocle_container()?;
+            }
+
+            target_workspace.layer = WorkspaceLayer::Tiling;
 
             if let Some(direction) = direction {
                 self.add_container_with_direction(
@@ -432,7 +470,7 @@ impl Monitor {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn focus_workspace(&mut self, idx: usize) -> Result<()> {
+    pub fn focus_workspace(&mut self, idx: usize) -> eyre::Result<()> {
         tracing::info!("focusing workspace");
 
         {
@@ -441,7 +479,7 @@ impl Monitor {
             if workspaces.get(idx).is_none() {
                 workspaces.resize(idx + 1, Workspace::default());
             }
-
+            self.last_focused_workspace = Some(self.workspaces.focused_idx());
             self.workspaces.focus(idx);
         }
 
@@ -451,8 +489,8 @@ impl Monitor {
             if name.is_some() {
                 self.workspaces_mut()
                     .get_mut(idx)
-                    .ok_or_else(|| anyhow!("there is no workspace"))?
-                    .set_name(name);
+                    .ok_or_eyre("there is no workspace")?
+                    .name = name;
             }
         }
 
@@ -463,9 +501,9 @@ impl Monitor {
         self.workspaces().len()
     }
 
-    pub fn update_focused_workspace(&mut self, offset: Option<Rect>) -> Result<()> {
-        let offset = if self.work_area_offset().is_some() {
-            self.work_area_offset()
+    pub fn update_focused_workspace(&mut self, offset: Option<Rect>) -> eyre::Result<()> {
+        let offset = if self.work_area_offset.is_some() {
+            self.work_area_offset
         } else {
             offset
         };
@@ -473,7 +511,7 @@ impl Monitor {
         let focused_workspace_idx = self.focused_workspace_idx();
         self.update_workspace_globals(focused_workspace_idx, offset);
         self.focused_workspace_mut()
-            .ok_or_else(|| anyhow!("there is no workspace"))?
+            .ok_or_eyre("there is no workspace")?
             .update()?;
 
         Ok(())
@@ -573,6 +611,25 @@ mod tests {
     }
 
     #[test]
+    fn test_remove_nonexistent_workspace() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        // Try to remove a workspace that doesn't exist
+        let removed_workspace = m.remove_workspace_by_idx(1);
+
+        // Should return None since there is no workspace at index 1
+        assert!(removed_workspace.is_none());
+    }
+
+    #[test]
     fn test_focus_workspace() {
         let mut m = Monitor::new(
             0,
@@ -613,5 +670,158 @@ mod tests {
 
         // Should be the last workspace index: 1
         assert_eq!(new_workspace_index, 1);
+    }
+
+    #[test]
+    fn test_move_container_to_workspace() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        let new_workspace_index = m.new_workspace_idx();
+        assert_eq!(new_workspace_index, 1);
+
+        {
+            // Create workspace 1 and add 3 containers
+            let workspace = m.focused_workspace_mut().unwrap();
+            for _ in 0..3 {
+                let container = Container::default();
+                workspace.add_container_to_back(container);
+            }
+
+            // Should have 3 containers in workspace 1
+            assert_eq!(m.focused_workspace().unwrap().containers().len(), 3);
+        }
+
+        // Create and focus workspace 2
+        m.focus_workspace(new_workspace_index).unwrap();
+
+        // Focus workspace 1
+        m.focus_workspace(0).unwrap();
+
+        // Move container to workspace 2
+        m.move_container_to_workspace(1, true, None).unwrap();
+
+        // Should be focused on workspace 2
+        assert_eq!(m.focused_workspace_idx(), 1);
+
+        // Workspace 2 should have 1 container now
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 1);
+
+        // Move to workspace 1
+        m.focus_workspace(0).unwrap();
+
+        // Workspace 1 should have 2 containers
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 2);
+
+        // Move a another container from workspace 1 to workspace 2 without following
+        m.move_container_to_workspace(1, false, None).unwrap();
+
+        // Should have 1 container
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 1);
+
+        // Should still be focused on workspace 1
+        assert_eq!(m.focused_workspace_idx(), 0);
+
+        // Switch to workspace 2
+        m.focus_workspace(1).unwrap();
+
+        // Workspace 2 should now have 2 containers
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 2);
+    }
+
+    #[test]
+    fn test_move_container_to_nonexistent_workspace() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        {
+            // Create workspace 1 and add 3 containers
+            let workspace = m.focused_workspace_mut().unwrap();
+            for _ in 0..3 {
+                let container = Container::default();
+                workspace.add_container_to_back(container);
+            }
+
+            // Should have 3 containers in workspace 1
+            assert_eq!(m.focused_workspace().unwrap().containers().len(), 3);
+        }
+
+        // Should only have 1 workspace
+        assert_eq!(m.workspaces().len(), 1);
+
+        // Try to move a container to a workspace that doesn't exist
+        m.move_container_to_workspace(8, true, None).unwrap();
+
+        // Should have 9 workspaces now
+        assert_eq!(m.workspaces().len(), 9);
+
+        // Should be focused on workspace 8
+        assert_eq!(m.focused_workspace_idx(), 8);
+
+        // Should have 1 container in workspace 8
+        assert_eq!(m.focused_workspace().unwrap().containers().len(), 1);
+    }
+
+    #[test]
+    fn test_ensure_workspace_count_workspace_contains_two_workspaces() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        // Create and focus another workspace
+        let new_workspace_index = m.new_workspace_idx();
+        m.focus_workspace(new_workspace_index).unwrap();
+
+        // Should have 2 workspaces now
+        assert_eq!(m.workspaces().len(), 2, "Monitor should have 2 workspaces");
+
+        // Ensure the monitor has at least 5 workspaces
+        m.ensure_workspace_count(5);
+
+        // Monitor should have 5 workspaces
+        assert_eq!(m.workspaces().len(), 5, "Monitor should have 5 workspaces");
+    }
+
+    #[test]
+    fn test_ensure_workspace_count_only_default_workspace() {
+        let mut m = Monitor::new(
+            0,
+            Rect::default(),
+            Rect::default(),
+            "TestMonitor".to_string(),
+            "TestDevice".to_string(),
+            "TestDeviceID".to_string(),
+            Some("TestMonitorID".to_string()),
+        );
+
+        // Ensure the monitor has at least 5 workspaces
+        m.ensure_workspace_count(5);
+
+        // Monitor should have 5 workspaces
+        assert_eq!(m.workspaces().len(), 5, "Monitor should have 5 workspaces");
+
+        // Try to call the ensure workspace count again to ensure it doesn't change
+        m.ensure_workspace_count(3);
+        assert_eq!(m.workspaces().len(), 5, "Monitor should have 5 workspaces");
     }
 }

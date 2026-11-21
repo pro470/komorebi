@@ -1,9 +1,9 @@
 #![warn(clippy::all)]
 
 use eframe::egui;
-use eframe::egui::color_picker::Alpha;
 use eframe::egui::Color32;
 use eframe::egui::ViewportBuilder;
+use eframe::egui::color_picker::Alpha;
 use komorebi_client::BorderStyle;
 use komorebi_client::Colour;
 use komorebi_client::DefaultLayout;
@@ -41,7 +41,9 @@ struct BorderColours {
     single: Color32,
     stack: Color32,
     monocle: Color32,
+    floating: Color32,
     unfocused: Color32,
+    unfocused_locked: Color32,
 }
 
 struct BorderConfig {
@@ -76,8 +78,8 @@ impl From<&komorebi_client::Monitor> for MonitorConfig {
         }
 
         Self {
-            size: *value.size(),
-            work_area_offset: value.work_area_offset().unwrap_or_default(),
+            size: value.size,
+            work_area_offset: value.work_area_offset.unwrap_or_default(),
             workspaces,
         }
     }
@@ -93,22 +95,22 @@ struct WorkspaceConfig {
 
 impl From<&komorebi_client::Workspace> for WorkspaceConfig {
     fn from(value: &komorebi_client::Workspace) -> Self {
-        let layout = match value.layout() {
-            Layout::Default(layout) => *layout,
+        let layout = match value.layout {
+            Layout::Default(layout) => layout,
             Layout::Custom(_) => DefaultLayout::BSP,
         };
 
         let name = value
-            .name()
+            .name
             .to_owned()
             .unwrap_or_else(|| random_word::get(random_word::Lang::En).to_string());
 
         Self {
             layout,
             name,
-            tile: *value.tile(),
-            workspace_padding: value.workspace_padding().unwrap_or(20),
-            container_padding: value.container_padding().unwrap_or(20),
+            tile: value.tile,
+            workspace_padding: value.workspace_padding.unwrap_or(20),
+            container_padding: value.container_padding.unwrap_or(20),
         }
     }
 }
@@ -154,7 +156,9 @@ impl KomorebiGui {
             single: colour32(global_state.border_colours.single),
             stack: colour32(global_state.border_colours.stack),
             monocle: colour32(global_state.border_colours.monocle),
+            floating: colour32(global_state.border_colours.floating),
             unfocused: colour32(global_state.border_colours.unfocused),
+            unfocused_locked: colour32(global_state.border_colours.unfocused_locked),
         };
 
         let border_config = BorderConfig {
@@ -243,7 +247,7 @@ impl eframe::App for KomorebiGui {
         egui::CentralPanel::default().show(ctx, |ui| {
             ctx.set_pixels_per_point(2.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_width(ctx.screen_rect().width());
+                ui.set_width(ctx.content_rect().width());
                 ui.collapsing("Debugging", |ui| {
                     ui.collapsing("Window Rules", |ui| {
                         let window = Window::from(self.debug_hwnd);
@@ -377,6 +381,22 @@ impl eframe::App for KomorebiGui {
                             }
                         });
 
+                        ui.collapsing("Floating", |ui| {
+                            if egui::color_picker::color_picker_color32(
+                                ui,
+                                &mut self.border_config.border_colours.floating,
+                                Alpha::Opaque,
+                            ) {
+                                komorebi_client::send_message(&SocketMessage::BorderColour(
+                                    WindowKind::Floating,
+                                    self.border_config.border_colours.floating.r() as u32,
+                                    self.border_config.border_colours.floating.g() as u32,
+                                    self.border_config.border_colours.floating.b() as u32,
+                                ))
+                                .unwrap();
+                            }
+                        });
+
                         ui.collapsing("Unfocused", |ui| {
                             if egui::color_picker::color_picker_color32(
                                 ui,
@@ -391,6 +411,22 @@ impl eframe::App for KomorebiGui {
                                 ))
                                 .unwrap();
                             }
+                        });
+
+                        ui.collapsing("Unfocused Locked", |ui| {
+                            if egui::color_picker::color_picker_color32(
+                                ui,
+                                &mut self.border_config.border_colours.unfocused_locked,
+                                Alpha::Opaque,
+                            ) {
+                                komorebi_client::send_message(&SocketMessage::BorderColour(
+                                    WindowKind::UnfocusedLocked,
+                                    self.border_config.border_colours.unfocused_locked.r() as u32,
+                                    self.border_config.border_colours.unfocused_locked.g() as u32,
+                                    self.border_config.border_colours.unfocused_locked.b() as u32,
+                                ))
+                                .unwrap();
+                            }
                         })
                     });
 
@@ -401,7 +437,7 @@ impl eframe::App for KomorebiGui {
                             BorderStyle::Square,
                         ] {
                             if ui
-                                .add(egui::SelectableLabel::new(
+                                .add(egui::Button::selectable(
                                     self.border_config.border_style == option,
                                     option.to_string(),
                                 ))
@@ -458,7 +494,7 @@ impl eframe::App for KomorebiGui {
                         StackbarMode::Always,
                     ] {
                         if ui
-                            .add(egui::SelectableLabel::new(
+                            .add(egui::Button::selectable(
                                 self.stackbar_config.mode == option,
                                 option.to_string(),
                             ))
@@ -477,7 +513,7 @@ impl eframe::App for KomorebiGui {
                     ui.collapsing("Label", |ui| {
                         for option in [StackbarLabel::Process, StackbarLabel::Title] {
                             if ui
-                                .add(egui::SelectableLabel::new(
+                                .add(egui::Button::selectable(
                                     self.stackbar_config.label == option,
                                     option.to_string(),
                                 ))
@@ -736,7 +772,7 @@ impl eframe::App for KomorebiGui {
                                                     DefaultLayout::Grid,
                                                 ] {
                                                     if ui
-                                                        .add(egui::SelectableLabel::new(
+                                                        .add(egui::Button::selectable(
                                                             workspace.layout == option,
                                                             option.to_string(),
                                                         ))

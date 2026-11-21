@@ -1,10 +1,9 @@
-use bevy_ecs::component::Component;
-use bevy_reflect::Reflect;
-use color_eyre::eyre::anyhow;
+use color_eyre::eyre;
 use color_eyre::eyre::bail;
-use color_eyre::Result;
 use serde::Deserialize;
 use serde::Serialize;
+use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -33,7 +32,7 @@ impl DerefMut for CustomLayout {
 }
 
 impl CustomLayout {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> eyre::Result<Self> {
         let path = path.as_ref();
         let layout: Self = match path.extension() {
             Some(extension) if extension == "yaml" || extension == "yml" => {
@@ -42,7 +41,7 @@ impl CustomLayout {
             Some(extension) if extension == "json" => {
                 serde_json::from_reader(BufReader::new(File::open(path)?))?
             }
-            _ => return Err(anyhow!("custom layouts must be json or yaml files")),
+            _ => bail!("custom layouts must be json or yaml files"),
         };
 
         if !layout.is_valid() {
@@ -68,6 +67,38 @@ impl CustomLayout {
         }
 
         None
+    }
+
+    /// Returns the container index of the primary container in the custom layout.
+    ///
+    /// This converts the column index of the `Column::Primary` variant to a container index.
+    #[must_use]
+    pub fn primary_container_index(&self) -> Option<usize> {
+        self.primary_idx()
+            .map(|col_idx| self.first_container_idx(col_idx))
+    }
+
+    /// Returns the container index of the secondary container in the custom layout.
+    ///
+    /// This finds the `Column::Secondary` variant and converts its column index to a container index.
+    /// Returns `None` if there is no secondary column or if there are not enough containers.
+    #[must_use]
+    pub fn secondary_container_index(&self, container_count: usize) -> Option<usize> {
+        if container_count < 2 {
+            return None;
+        }
+
+        for (i, column) in self.iter().enumerate() {
+            if let Column::Secondary(_) = column {
+                let idx = self.first_container_idx(i);
+                if idx < container_count {
+                    return Some(idx);
+                }
+            }
+        }
+
+        // Fallback: if no secondary column, return index 1 if it exists
+        if container_count >= 2 { Some(1) } else { None }
     }
 
     #[must_use]

@@ -1,7 +1,7 @@
 use bevy_ecs::component::Component;
 use bevy_reflect::Reflect;
 use clap::ValueEnum;
-use color_eyre::Result;
+use color_eyre::eyre;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
@@ -57,41 +57,64 @@ impl ApplicationOptions {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Rule for matching applications
 pub enum MatchingRule {
+    /// Simple matching rule which must evaluate to true
     Simple(IdWithIdentifier),
+    /// Composite matching rule where all conditions must evaluate to true
     Composite(Vec<IdWithIdentifier>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Rule for assigning applications to a workspace
 pub struct WorkspaceMatchingRule {
+    /// Target monitor index
     pub monitor_index: usize,
+    /// Target workspace index
     pub workspace_index: usize,
+    /// Matching rule for the application
     pub matching_rule: MatchingRule,
+    /// Whether to apply the rule only when the application is initially launched
     pub initial_only: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Rule for matching applications
 pub struct IdWithIdentifier {
+    /// Kind of identifier to target
     pub kind: ApplicationIdentifier,
+    /// Target identifier
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Matching strategy to use
     pub matching_strategy: Option<MatchingStrategy>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Display, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Strategy for matching identifiers
 pub enum MatchingStrategy {
+    /// Should not be used, only kept for backward compatibility
     Legacy,
+    /// Equals
     Equals,
+    /// Starts With
     StartsWith,
+    /// Ends With
     EndsWith,
+    /// Contains
     Contains,
+    /// Regex
     Regex,
+    /// Does not end with
     DoesNotEndWith,
+    /// Does not start with
     DoesNotStartWith,
+    /// Does not equal
     DoesNotEqual,
+    /// Does not contain
     DoesNotContain,
 }
 
@@ -146,11 +169,11 @@ impl ApplicationConfiguration {
 pub struct ApplicationConfigurationGenerator;
 
 impl ApplicationConfigurationGenerator {
-    pub fn load(content: &str) -> Result<Vec<ApplicationConfiguration>> {
+    pub fn load(content: &str) -> eyre::Result<Vec<ApplicationConfiguration>> {
         Ok(serde_yaml::from_str(content)?)
     }
 
-    pub fn format(content: &str) -> Result<String> {
+    pub fn format(content: &str) -> eyre::Result<String> {
         let mut cfgen = Self::load(content)?;
         for cfg in &mut cfgen {
             cfg.populate_default_matching_strategies();
@@ -160,7 +183,10 @@ impl ApplicationConfigurationGenerator {
         Ok(serde_yaml::to_string(&cfgen)?)
     }
 
-    fn merge(base_content: &str, override_content: &str) -> Result<Vec<ApplicationConfiguration>> {
+    fn merge(
+        base_content: &str,
+        override_content: &str,
+    ) -> eyre::Result<Vec<ApplicationConfiguration>> {
         let base_cfgen = Self::load(base_content)?;
         let override_cfgen = Self::load(override_content)?;
 
@@ -186,7 +212,7 @@ impl ApplicationConfigurationGenerator {
     pub fn generate_pwsh(
         base_content: &str,
         override_content: Option<&str>,
-    ) -> Result<Vec<String>> {
+    ) -> eyre::Result<Vec<String>> {
         let mut cfgen = if let Some(override_content) = override_content {
             Self::merge(base_content, override_content)?
         } else {
@@ -237,7 +263,10 @@ impl ApplicationConfigurationGenerator {
         Ok(lines)
     }
 
-    pub fn generate_ahk(base_content: &str, override_content: Option<&str>) -> Result<Vec<String>> {
+    pub fn generate_ahk(
+        base_content: &str,
+        override_content: Option<&str>,
+    ) -> eyre::Result<Vec<String>> {
         let mut cfgen = if let Some(override_content) = override_content {
             Self::merge(base_content, override_content)?
         } else {

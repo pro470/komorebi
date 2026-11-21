@@ -1,22 +1,19 @@
 use bevy_ecs::component::Component;
 use bevy_reflect::Reflect;
 use hex_color::HexColor;
-use komorebi_themes::Color32;
 #[cfg(feature = "schemars")]
-use schemars::gen::SchemaGenerator;
+use schemars::Schema;
 #[cfg(feature = "schemars")]
-use schemars::schema::InstanceType;
-#[cfg(feature = "schemars")]
-use schemars::schema::Schema;
-#[cfg(feature = "schemars")]
-use schemars::schema::SchemaObject;
+use schemars::SchemaGenerator;
 
+use crate::Color32;
 use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
+/// Colour representation
 pub enum Colour {
     /// Colour represented as RGB
     Rgb(Rgb),
@@ -59,21 +56,20 @@ impl From<Colour> for Color32 {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
-pub struct Hex(#[reflect(ignore)] HexColor);
+pub struct Hex(#[reflect(ignore)] pub HexColor);
 
 #[cfg(feature = "schemars")]
 impl schemars::JsonSchema for Hex {
-    fn schema_name() -> String {
-        String::from("Hex")
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("Hex")
     }
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            format: Some("color-hex".to_string()),
-            ..Default::default()
-        }
-        .into()
+        schemars::json_schema!({
+            "type": "string",
+            "format": "color-hex",
+            "description": "Colour represented as a Hex string"
+        })
     }
 }
 
@@ -88,6 +84,7 @@ impl From<Colour> for u32 {
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Colour represented as RGB
 pub struct Rgb {
     /// Red
     pub r: u32,

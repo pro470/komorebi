@@ -1,46 +1,118 @@
-use std::sync::atomic::Ordering;
+use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
 
-use color_eyre::eyre::anyhow;
-use color_eyre::Result;
+use color_eyre::eyre;
+use color_eyre::eyre::OptionExt;
 use crossbeam_utils::atomic::AtomicConsume;
 use parking_lot::Mutex;
 
-use crate::core::OperationDirection;
 use crate::core::Rect;
-use crate::core::Sizing;
 use crate::core::WindowContainerBehaviour;
 
+use crate::CURRENT_VIRTUAL_DESKTOP;
+use crate::DefaultLayout;
+use crate::FLOATING_APPLICATIONS;
+use crate::HIDDEN_HWNDS;
+use crate::Layout;
+use crate::Notification;
+use crate::NotificationEvent;
+use crate::REGEX_IDENTIFIERS;
+use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
+use crate::VirtualDesktopNotification;
+use crate::Window;
 use crate::border_manager;
-use crate::border_manager::BORDER_OFFSET;
-use crate::border_manager::BORDER_WIDTH;
 use crate::current_virtual_desktop;
 use crate::notify_subscribers;
+use crate::splash;
+use crate::splash::mdm_enrollment;
 use crate::stackbar_manager;
+use crate::state::State;
 use crate::transparency_manager;
-use crate::window::should_act;
 use crate::window::RuleDebug;
+use crate::window::should_act;
 use crate::window_manager::WindowManager;
 use crate::window_manager_event::WindowManagerEvent;
 use crate::windows_api::WindowsApi;
 use crate::winevent::WinEvent;
 use crate::workspace::WorkspaceLayer;
-use crate::workspace_reconciliator;
-use crate::workspace_reconciliator::ALT_TAB_HWND;
-use crate::workspace_reconciliator::ALT_TAB_HWND_INSTANT;
-use crate::Notification;
-use crate::NotificationEvent;
-use crate::State;
-use crate::FLOATING_APPLICATIONS;
-use crate::HIDDEN_HWNDS;
-use crate::REGEX_IDENTIFIERS;
-use crate::TRAY_AND_MULTI_WINDOW_IDENTIFIERS;
+
+fn should_skip_focus_change(foreground_hwnd: Option<isize>, window_hwnd: isize) -> bool {
+    matches!(foreground_hwnd, Some(hwnd) if hwnd != window_hwnd)
+}
+
+/// After a managed window is destroyed, Windows may promote no successor, leaving
+/// the foreground null with no FocusChange to reconcile from. The selection then
+/// never regains focus: every border renders unfocused and keystrokes fall through
+/// to nothing until the user refocuses by hand. Refocus only in that case, otherwise
+/// foreground successor is left to FocusChange so we don't fight the OS or desync
+/// focus.
+fn should_refocus_after_destroy(foreground_hwnd: Option<isize>) -> bool {
+    matches!(foreground_hwnd, None | Some(0))
+}
+
+#[cfg(test)]
+mod focus_change_tests {
+    use super::should_skip_focus_change;
+
+    #[test]
+    fn skips_focus_change_from_background_window() {
+        assert!(should_skip_focus_change(Some(1), 2));
+    }
+
+    #[test]
+    fn allows_focus_change_for_foreground_window() {
+        assert!(!should_skip_focus_change(Some(1), 1));
+    }
+
+    #[test]
+    fn allows_focus_change_when_foreground_unknown() {
+        assert!(!should_skip_focus_change(None, 1));
+    }
+}
+
+#[cfg(test)]
+mod destroy_focus_tests {
+    use super::should_refocus_after_destroy;
+
+    #[test]
+    fn refocuses_when_foreground_is_null() {
+        assert!(should_refocus_after_destroy(Some(0)));
+    }
+
+    #[test]
+    fn refocuses_when_foreground_is_unavailable() {
+        assert!(should_refocus_after_destroy(None));
+    }
+
+    #[test]
+    fn defers_when_a_successor_took_the_foreground() {
+        assert!(!should_refocus_after_destroy(Some(12345)));
+    }
+}
 
 #[tracing::instrument]
 pub fn listen_for_events(wm: Arc<Mutex<WindowManager>>) {
     let receiver = wm.lock().incoming_events.clone();
+
+    std::thread::spawn(|| {
+        loop {
+            if let Ok((mdm, server)) = mdm_enrollment() {
+                #[allow(clippy::collapsible_if)]
+                if mdm && splash::should().map(|f| f.into()).unwrap_or(true) {
+                    let mut args = vec!["splash".to_string()];
+                    if let Some(server) = server {
+                        if !server.trim().is_empty() {
+                            args.push(server);
+                        }
+                    }
+
+                    let _ = Command::new("komorebic").args(&args).spawn();
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(14400));
+        }
+    });
 
     std::thread::spawn(move || {
         tracing::info!("listening");
@@ -65,7 +137,7 @@ pub fn listen_for_events(wm: Arc<Mutex<WindowManager>>) {
 impl WindowManager {
     #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
     #[tracing::instrument(skip(self, event), fields(event = event.title(), winevent = event.winevent(), hwnd = event.hwnd()))]
-    pub fn process_event(&mut self, event: WindowManagerEvent) -> Result<()> {
+    pub fn process_event(&mut self, event: WindowManagerEvent) -> eyre::Result<()> {
         if self.is_paused {
             tracing::trace!("ignoring while paused");
             return Ok(());
@@ -120,14 +192,65 @@ impl WindowManager {
             }
         }
 
+        let mut last_known_virtual_desktop_id = CURRENT_VIRTUAL_DESKTOP.lock();
+
         if let Some(virtual_desktop_id) = &self.virtual_desktop_id {
-            if let Some(id) = current_virtual_desktop() {
+            let latest_virtual_desktop_id = current_virtual_desktop();
+            if let Some(id) = latest_virtual_desktop_id {
+                // if we are on the vd associated with komorebi
+                let should_retile = id == *virtual_desktop_id
+                    // and we came from a vd not associated with komorebi
+                    && (*last_known_virtual_desktop_id).clone().unwrap_or_default() != id;
+
+                *last_known_virtual_desktop_id = Some(id.clone());
                 if id != *virtual_desktop_id {
                     tracing::info!(
                         "ignoring events and commands while not on virtual desktop {:?}",
                         virtual_desktop_id
                     );
+
+                    // TODO: when returning from another VD to the VD associated with komorebi
+                    // if borders are enabled, they will not be drawn again until the user interacts
+                    // with the workspace or forces a retile
+                    border_manager::destroy_all_borders()?;
+
+                    // to be consumed by integrating gui applications like bars to know
+                    // when to hide visual components which don't make sense when not on
+                    // komorebi's associated virtual desktop
+                    tracing::debug!(
+                        "notifying subscribers that we have left komorebi's associated virtual desktop"
+                    );
+                    notify_subscribers(
+                        Notification {
+                            event: NotificationEvent::VirtualDesktop(
+                                VirtualDesktopNotification::LeftAssociatedVirtualDesktop,
+                            ),
+                            state: self.as_ref().into(),
+                        },
+                        true,
+                    )?;
+
                     return Ok(());
+                }
+
+                if should_retile {
+                    self.retile_all(true)?;
+
+                    // to be consumed by integrating gui applications like bars to know
+                    // when to show visual components associated with komorebi's virtual
+                    // desktop
+                    tracing::debug!(
+                        "notifying subscribers that we are back on komorebi's associated virtual desktop"
+                    );
+                    notify_subscribers(
+                        Notification {
+                            event: NotificationEvent::VirtualDesktop(
+                                VirtualDesktopNotification::EnteredAssociatedVirtualDesktop,
+                            ),
+                            state: self.as_ref().into(),
+                        },
+                        true,
+                    )?;
                 }
             }
         }
@@ -156,12 +279,11 @@ impl WindowManager {
                     //
                     // This check ensures that we only update the focused monitor when the window
                     // triggering monitor reconciliation is known to not be tied to a specific monitor.
-                    if let Ok(class) = window.class() {
-                        if class != "OleMainThreadWndClass"
-                            && self.focused_monitor_idx() != monitor_idx
-                        {
-                            self.focus_monitor(monitor_idx)?;
-                        }
+                    if let Ok(class) = window.class()
+                        && class != "OleMainThreadWndClass"
+                        && self.focused_monitor_idx() != monitor_idx
+                    {
+                        self.focus_monitor(monitor_idx)?;
                     }
                 }
             }
@@ -185,7 +307,13 @@ impl WindowManager {
             WindowManagerEvent::Destroy(_, window) | WindowManagerEvent::Unmanage(window) => {
                 if self.focused_workspace()?.contains_window(window.hwnd) {
                     self.focused_workspace_mut()?.remove_window(window.hwnd)?;
-                    self.update_focused_workspace(false, false)?;
+
+                    // With refocus true, update_focused_workspace focuses the surviving
+                    // selection (maximized/monocle/tiling); with refocus false it only
+                    // re-tiles.
+                    let refocus =
+                        should_refocus_after_destroy(WindowsApi::foreground_window().ok());
+                    self.update_focused_workspace(refocus, refocus)?;
 
                     let mut already_moved_window_handles = self.already_moved_window_handles.lock();
 
@@ -193,18 +321,33 @@ impl WindowManager {
                 }
             }
             WindowManagerEvent::Minimize(_, window) => {
-                let mut hide = false;
+                // During transient display connection changes (e.g. monitor
+                // briefly disconnecting and reconnecting), Windows may fire
+                // SystemMinimizeStart for windows on the affected monitor.
+                // We must not treat these OS-initiated minimizes as user
+                // actions, otherwise the window gets removed from the
+                // workspace and the reconciliator cannot restore it.
+                if crate::monitor_reconciliator::display_change_in_progress(
+                    std::time::Duration::from_secs(10),
+                ) {
+                    tracing::debug!(
+                        "ignoring minimize during display connection change for hwnd: {}",
+                        window.hwnd
+                    );
+                } else {
+                    let mut hide = false;
 
-                {
-                    let programmatically_hidden_hwnds = HIDDEN_HWNDS.lock();
-                    if !programmatically_hidden_hwnds.contains(&window.hwnd) {
-                        hide = true;
+                    {
+                        let programmatically_hidden_hwnds = HIDDEN_HWNDS.lock();
+                        if !programmatically_hidden_hwnds.contains(&window.hwnd) {
+                            hide = true;
+                        }
                     }
-                }
 
-                if hide {
-                    self.focused_workspace_mut()?.remove_window(window.hwnd)?;
-                    self.update_focused_workspace(false, false)?;
+                    if hide {
+                        self.focused_workspace_mut()?.remove_window(window.hwnd)?;
+                        self.update_focused_workspace(false, false)?;
+                    }
                 }
             }
             WindowManagerEvent::Hide(_, window) => {
@@ -245,7 +388,12 @@ impl WindowManager {
 
                 if hide {
                     self.focused_workspace_mut()?.remove_window(window.hwnd)?;
-                    self.update_focused_workspace(false, false)?;
+
+                    // Closing a window sends Hide and not Destroy to many applications, so
+                    // hand focus on to the surviving window as the Destroy arm does
+                    let refocus =
+                        should_refocus_after_destroy(WindowsApi::foreground_window().ok());
+                    self.update_focused_workspace(refocus, refocus)?;
                 }
 
                 let mut already_moved_window_handles = self.already_moved_window_handles.lock();
@@ -253,10 +401,21 @@ impl WindowManager {
                 already_moved_window_handles.remove(&window.hwnd);
             }
             WindowManagerEvent::FocusChange(_, window) => {
+                if should_skip_focus_change(WindowsApi::foreground_window().ok(), window.hwnd) {
+                    tracing::debug!(
+                        "ignoring stale focus change for hwnd {} as it is not the foreground window",
+                        window.hwnd
+                    );
+                    return Ok(());
+                }
                 // don't want to trigger the full workspace updates when there are no managed
                 // containers - this makes floating windows on empty workspaces go into very
                 // annoying focus change loops which prevents users from interacting with them
-                if !self.focused_workspace()?.containers().is_empty() {
+                if !matches!(
+                    self.focused_workspace()?.layout,
+                    Layout::Default(DefaultLayout::Scrolling)
+                ) && !self.focused_workspace()?.containers().is_empty()
+                {
                     self.update_focused_workspace(self.mouse_follows_focus, false)?;
                 }
 
@@ -268,13 +427,13 @@ impl WindowManager {
 
                 match floating_window_idx {
                     None => {
-                        if let Some(w) = workspace.maximized_window() {
-                            if w.hwnd == window.hwnd {
-                                return Ok(());
-                            }
+                        if let Some(w) = &workspace.maximized_window
+                            && w.hwnd == window.hwnd
+                        {
+                            return Ok(());
                         }
 
-                        if let Some(monocle) = workspace.monocle_container() {
+                        if let Some(monocle) = &workspace.monocle_container {
                             if let Some(window) = monocle.focused_window() {
                                 window.focus(false)?;
                             }
@@ -282,11 +441,19 @@ impl WindowManager {
                             workspace.focus_container_by_window(window.hwnd)?;
                         }
 
-                        workspace.set_layer(WorkspaceLayer::Tiling);
+                        workspace.layer = WorkspaceLayer::Tiling;
+
+                        if matches!(
+                            self.focused_workspace()?.layout,
+                            Layout::Default(DefaultLayout::Scrolling)
+                        ) && !self.focused_workspace()?.containers().is_empty()
+                        {
+                            self.update_focused_workspace(self.mouse_follows_focus, false)?;
+                        }
                     }
                     Some(idx) => {
                         if let Some(_window) = workspace.floating_windows().get(idx) {
-                            workspace.set_layer(WorkspaceLayer::Floating);
+                            workspace.layer = WorkspaceLayer::Floating;
                         }
                     }
                 }
@@ -304,34 +471,7 @@ impl WindowManager {
                     let focused_workspace_idx =
                         self.focused_workspace_idx_for_monitor_idx(focused_monitor_idx)?;
 
-                    let focused_pair = (focused_monitor_idx, focused_workspace_idx);
-
-                    let mut needs_reconciliation = false;
-
-                    if let Some((m_idx, w_idx)) = self.known_hwnds.get(&window.hwnd) {
-                        if focused_pair != (*m_idx, *w_idx) {
-                            // At this point we know we are going to send a notification to the workspace reconciliator
-                            // So we get the topmost window returned by EnumWindows, which is almost always the window
-                            // that has been selected by alt-tab
-                            if let Ok(alt_tab_windows) = WindowsApi::alt_tab_windows() {
-                                if let Some(first) =
-                                    alt_tab_windows.iter().find(|w| w.title().is_ok())
-                                {
-                                    // If our record of this HWND hasn't been updated in over a minute
-                                    let mut instant = ALT_TAB_HWND_INSTANT.lock();
-                                    if instant.elapsed().gt(&Duration::from_secs(1)) {
-                                        // Update our record with the HWND we just found
-                                        ALT_TAB_HWND.store(Some(first.hwnd));
-                                        // Update the timestamp of our record
-                                        *instant = Instant::now();
-                                    }
-                                }
-                            }
-
-                            workspace_reconciliator::send_notification(*m_idx, *w_idx);
-                            needs_reconciliation = true;
-                        }
-                    }
+                    let mut needs_reconciliation = None;
 
                     // There are some applications such as Firefox where, if they are focused when a
                     // workspace switch takes place, it will fire an additional Show event, which will
@@ -340,35 +480,67 @@ impl WindowManager {
                     // duplicates across multiple workspaces, as it results in ghost layout tiles.
                     let mut proceed = true;
 
-                    if let Some((m_idx, w_idx)) = self.known_hwnds.get(&window.hwnd) {
-                        if let Some(focused_workspace_idx) = self
+                    // Check for potential `alt-tab` event
+                    if matches!(
+                        event,
+                        WindowManagerEvent::Uncloak(_, _) | WindowManagerEvent::Show(_, _)
+                    ) {
+                        needs_reconciliation = self.needs_reconciliation(window)?;
+
+                        if let Some((m_idx, ws_idx)) = needs_reconciliation {
+                            self.perform_reconciliation(window, (m_idx, ws_idx))?;
+
+                            // Since there was a reconciliation after an `alt-tab`, that means this
+                            // window is already handled by komorebi so we shouldn't proceed with
+                            // adding it as a new window.
+                            proceed = false;
+                        }
+                    }
+
+                    if let Some((m_idx, w_idx)) = self.known_hwnds.get(&window.hwnd)
+                        && let Some(focused_workspace_idx) = self
                             .monitors()
                             .get(*m_idx)
                             .map(|m| m.focused_workspace_idx())
-                        {
-                            if *m_idx != self.focused_monitor_idx()
-                                && *w_idx != focused_workspace_idx
-                            {
-                                tracing::debug!(
-                                    "ignoring show event for window already associated with another workspace"
-                                );
+                        && *m_idx != self.focused_monitor_idx()
+                        && *w_idx != focused_workspace_idx
+                    {
+                        tracing::debug!(
+                            "ignoring show event for window already associated with another workspace"
+                        );
 
-                                window.hide();
-                                proceed = false;
-                            }
+                        window.hide();
+                        proceed = false;
+                    }
+
+                    // after enforce_workspace_rules() has run, check if window exists in ANY workspace
+                    // to prevent duplication when workspace rules move windows across workspaces
+                    if proceed {
+                        let window_already_managed = self
+                            .monitors()
+                            .iter()
+                            .flat_map(|m| m.workspaces())
+                            .any(|ws| ws.contains_window(window.hwnd));
+
+                        if window_already_managed {
+                            tracing::debug!(
+                                "skipping window addition, already managed after workspace rule enforcement"
+                            );
+
+                            proceed = false;
                         }
                     }
 
                     if proceed {
-                        let mut behaviour = self.window_management_behaviour(
+                        let behaviour = self.window_management_behaviour(
                             focused_monitor_idx,
                             focused_workspace_idx,
                         );
                         let workspace = self.focused_workspace_mut()?;
                         let workspace_contains_window = workspace.contains_window(window.hwnd);
-                        let monocle_container = workspace.monocle_container().clone();
+                        let monocle_container = workspace.monocle_container.clone();
 
-                        if !workspace_contains_window && !needs_reconciliation {
+                        if !workspace_contains_window && needs_reconciliation.is_none() {
                             let floating_applications = FLOATING_APPLICATIONS.lock();
                             let mut should_float = false;
 
@@ -390,40 +562,47 @@ impl WindowManager {
                                 }
                             }
 
-                            behaviour.float_override = behaviour.float_override
-                                || (should_float
-                                    && !matches!(event, WindowManagerEvent::Manage(_)));
-
-                            if behaviour.float_override {
-                                // Center floating windows if we are already on the `Floating`
-                                // layer and the window doesn't match a `floating_windows` rule and
-                                // the workspace is not a floating workspace
+                            if behaviour.float_override
+                                || behaviour.floating_layer_override
+                                || (should_float && !matches!(event, WindowManagerEvent::Manage(_)))
+                            {
+                                let placement = if behaviour.floating_layer_override {
+                                    // Floating layer override placement
+                                    behaviour.floating_layer_placement
+                                } else if behaviour.float_override {
+                                    // Float override placement
+                                    behaviour.float_override_placement
+                                } else {
+                                    // Float rule placement
+                                    behaviour.float_rule_placement
+                                };
+                                // Center floating windows according to the proper placement if not
+                                // on a floating workspace
                                 let center_spawned_floats =
-                                    matches!(workspace.layer, WorkspaceLayer::Floating)
-                                        && !should_float
-                                        && workspace.tile;
-                                workspace.floating_windows_mut().push(window);
-                                workspace.set_layer(WorkspaceLayer::Floating);
+                                    placement.should_center() && workspace.tile;
+                                workspace.floating_windows_mut().push_back(window);
+                                workspace.layer = WorkspaceLayer::Floating;
                                 if center_spawned_floats {
                                     let mut floating_window = window;
-                                    floating_window.center(&workspace.globals().work_area)?;
+                                    floating_window.center(
+                                        &workspace.globals.work_area,
+                                        placement.should_resize(),
+                                    )?;
                                 }
                                 self.update_focused_workspace(false, false)?;
                             } else {
                                 match behaviour.current_behaviour {
                                     WindowContainerBehaviour::Create => {
                                         workspace.new_container_for_window(window);
-                                        workspace.set_layer(WorkspaceLayer::Tiling);
+                                        workspace.layer = WorkspaceLayer::Tiling;
                                         self.update_focused_workspace(false, false)?;
                                     }
                                     WindowContainerBehaviour::Append => {
                                         workspace
                                             .focused_container_mut()
-                                            .ok_or_else(|| {
-                                                anyhow!("there is no focused container")
-                                            })?
+                                            .ok_or_eyre("there is no focused container")?
                                             .add_window(window);
-                                        workspace.set_layer(WorkspaceLayer::Tiling);
+                                        workspace.layer = WorkspaceLayer::Tiling;
                                         self.update_focused_workspace(true, false)?;
                                         stackbar_manager::send_notification();
                                     }
@@ -448,15 +627,17 @@ impl WindowManager {
 
                         if workspace_contains_window {
                             let mut monocle_window_event = false;
-                            if let Some(ref monocle) = monocle_container {
-                                if let Some(monocle_window) = monocle.focused_window() {
-                                    if monocle_window.hwnd == window.hwnd {
-                                        monocle_window_event = true;
-                                    }
-                                }
+                            if let Some(ref monocle) = monocle_container
+                                && let Some(monocle_window) = monocle.focused_window()
+                                && monocle_window.hwnd == window.hwnd
+                            {
+                                monocle_window_event = true;
                             }
 
-                            if !monocle_window_event && monocle_container.is_some() {
+                            let workspace = self.focused_workspace()?;
+                            if !(monocle_window_event || workspace.layer != WorkspaceLayer::Tiling)
+                                && monocle_container.is_some()
+                            {
                                 window.hide();
                             }
                         }
@@ -467,15 +648,24 @@ impl WindowManager {
                 let monitor_idx = self.focused_monitor_idx();
                 let workspace_idx = self
                     .focused_monitor()
-                    .ok_or_else(|| anyhow!("there is no monitor with this idx"))?
+                    .ok_or_eyre("there is no monitor with this idx")?
                     .focused_workspace_idx();
 
                 WindowsApi::bring_window_to_top(window.hwnd)?;
 
+                let started_from = WindowsApi::window_rect(window.hwnd)?;
+
                 let pending_move_op = Arc::make_mut(&mut self.pending_move_op);
-                *pending_move_op = Option::from((monitor_idx, workspace_idx, window.hwnd));
+                *pending_move_op =
+                    Option::from((monitor_idx, workspace_idx, window.hwnd, started_from));
+
+                self.live_resize_begin(window.hwnd, started_from);
             }
             WindowManagerEvent::MoveResizeEnd(_, window) => {
+                // the workspace is as it was when the user took hold, which is what the
+                // end of a drag is worked out from, with steps or without
+                let _snapping = self.live_resize_end();
+
                 // We need this because if the event ends on a different monitor,
                 // that monitor will already have been focused and updated in the state
                 let pending = *self.pending_move_op;
@@ -485,19 +675,19 @@ impl WindowManager {
 
                 // If the window handles don't match then something went wrong and the pending move
                 // is not related to this current move, if so abort this operation.
-                if let Some((_, _, w_hwnd)) = pending {
-                    if w_hwnd != window.hwnd {
-                        color_eyre::eyre::bail!(
-                            "window handles for move operation don't match: {} != {}",
-                            w_hwnd,
-                            window.hwnd
-                        );
-                    }
+                if let Some((_, _, w_hwnd, _)) = pending
+                    && w_hwnd != window.hwnd
+                {
+                    color_eyre::eyre::bail!(
+                        "window handles for move operation don't match: {} != {}",
+                        w_hwnd,
+                        window.hwnd
+                    );
                 }
 
                 let target_monitor_idx = self
                     .monitor_idx_from_current_pos()
-                    .ok_or_else(|| anyhow!("cannot get monitor idx from current position"))?;
+                    .ok_or_eyre("cannot get monitor idx from current position")?;
 
                 let focused_monitor_idx = self.focused_monitor_idx();
                 let focused_workspace_idx = self.focused_workspace_idx().unwrap_or_default();
@@ -507,26 +697,32 @@ impl WindowManager {
                 let workspace = self.focused_workspace_mut()?;
                 let focused_container_idx = workspace.focused_container_idx();
                 let new_position = WindowsApi::window_rect(window.hwnd)?;
-                let old_position = *workspace
-                    .latest_layout()
-                    .get(focused_container_idx)
-                    // If the move was to another monitor with an empty workspace, the
-                    // workspace here will refer to that empty workspace, which won't
-                    // have any latest layout set. We fall back to a Default for Rect
-                    // which allows us to make a reasonable guess that the drag has taken
-                    // place across a monitor boundary to an empty workspace
-                    .unwrap_or(&Rect::default());
+                // Measure against the rect the window had when the drag started, which is what
+                // the user had under the pointer; a window is not always exactly on its tile
+                // (cell grids, minimum sizes, border insets)
+                let old_position = match pending {
+                    Some((_, _, _, started_from)) => started_from,
+                    None => *workspace
+                        .latest_layout
+                        .get(focused_container_idx)
+                        // If the move was to another monitor with an empty workspace, the
+                        // workspace here will refer to that empty workspace, which won't
+                        // have any latest layout set. We fall back to a Default for Rect
+                        // which allows us to make a reasonable guess that the drag has taken
+                        // place across a monitor boundary to an empty workspace
+                        .unwrap_or(&Rect::default()),
+                };
 
                 // This will be true if we have moved to another monitor
                 let mut moved_across_monitors = false;
 
-                if let Some((m_idx, _)) = self.known_hwnds.get(&window.hwnd) {
-                    if *m_idx != target_monitor_idx {
-                        moved_across_monitors = true;
-                    }
+                if let Some((m_idx, _)) = self.known_hwnds.get(&window.hwnd)
+                    && *m_idx != target_monitor_idx
+                {
+                    moved_across_monitors = true;
                 }
 
-                if let Some((origin_monitor_idx, origin_workspace_idx, _)) = pending {
+                if let Some((origin_monitor_idx, origin_workspace_idx, _, _)) = pending {
                     // If we didn't move to another monitor with an empty workspace, it is
                     // still possible that we moved to another monitor with a populated workspace
                     if !moved_across_monitors {
@@ -541,10 +737,10 @@ impl WindowManager {
                             let origin_workspace = self
                                 .monitors()
                                 .get(origin_monitor_idx)
-                                .ok_or_else(|| anyhow!("cannot get monitor idx"))?
+                                .ok_or_eyre("cannot get monitor idx")?
                                 .workspaces()
                                 .get(origin_workspace_idx)
-                                .ok_or_else(|| anyhow!("cannot get workspace idx"))?;
+                                .ok_or_eyre("cannot get workspace idx")?;
 
                             let managed_window = origin_workspace.contains_window(window.hwnd);
 
@@ -556,45 +752,34 @@ impl WindowManager {
                 }
 
                 let workspace = self.focused_workspace_mut()?;
-                if (*workspace.tile() && workspace.contains_managed_window(window.hwnd))
+                if (workspace.tile && workspace.contains_managed_window(window.hwnd))
                     || moved_across_monitors
                 {
-                    let resize = Rect {
-                        left: new_position.left - old_position.left,
-                        top: new_position.top - old_position.top,
-                        right: new_position.right - old_position.right,
-                        bottom: new_position.bottom - old_position.bottom,
-                    };
-
                     // If we have moved across the monitors, use that override, otherwise determine
                     // if a move has taken place by ruling out a resize
-                    let right_bottom_constant = 0;
-
                     let is_move = moved_across_monitors
-                        || resize.right.abs() == right_bottom_constant
-                            && resize.bottom.abs() == right_bottom_constant;
+                        || (new_position.right == old_position.right
+                            && new_position.bottom == old_position.bottom);
 
                     if is_move {
                         tracing::info!("moving with mouse");
 
                         if moved_across_monitors {
-                            if let Some((origin_monitor_idx, origin_workspace_idx, w_hwnd)) =
+                            if let Some((origin_monitor_idx, origin_workspace_idx, w_hwnd, _)) =
                                 pending
                             {
                                 let target_workspace_idx = self
                                     .monitors()
                                     .get(target_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?
+                                    .ok_or_eyre("there is no monitor at this idx")?
                                     .focused_workspace_idx();
 
                                 let target_container_idx = self
                                     .monitors()
                                     .get(target_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?
+                                    .ok_or_eyre("there is no monitor at this idx")?
                                     .focused_workspace()
-                                    .ok_or_else(|| {
-                                        anyhow!("there is no focused workspace for this monitor")
-                                    })?
+                                    .ok_or_eyre("there is no focused workspace for this monitor")?
                                     .container_idx_from_current_point()
                                     // Default to 0 in the case of an empty workspace
                                     .unwrap_or(0);
@@ -614,7 +799,7 @@ impl WindowManager {
                                 let origin_monitor = self
                                     .monitors_mut()
                                     .get_mut(origin_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?;
+                                    .ok_or_eyre("there is no monitor at this idx")?;
                                 origin_monitor.focus_workspace(origin_workspace_idx)?;
                                 self.update_focused_workspace(false, false)?;
 
@@ -622,7 +807,7 @@ impl WindowManager {
                                 let target_monitor = self
                                     .monitors_mut()
                                     .get_mut(target_monitor_idx)
-                                    .ok_or_else(|| anyhow!("there is no monitor at this idx"))?;
+                                    .ok_or_eyre("there is no monitor at this idx")?;
                                 target_monitor.focus_workspace(target_workspace_idx)?;
                                 self.update_focused_workspace(false, false)?;
 
@@ -630,7 +815,7 @@ impl WindowManager {
                                 window.focus(self.mouse_follows_focus)?;
                             }
                         } else if window_management_behaviour.float_override {
-                            workspace.floating_windows_mut().push(window);
+                            workspace.floating_windows_mut().push_back(window);
                             self.update_focused_workspace(false, false)?;
                         } else {
                             match window_management_behaviour.current_behaviour {
@@ -669,51 +854,68 @@ impl WindowManager {
                         }
                     } else {
                         tracing::info!("resizing with mouse");
-                        let mut ops = vec![];
-
-                        macro_rules! resize_op {
-                            ($coordinate:expr, $comparator:tt, $direction:expr) => {{
-                                let adjusted = $coordinate * 2;
-                                let sizing = if adjusted $comparator 0 {
-                                    Sizing::Decrease
-                                } else {
-                                    Sizing::Increase
-                                };
-
-                                ($direction, sizing, adjusted.abs())
-                            }};
+                        // Resize the container of the dragged window, which is not necessarily
+                        // the focused one if the press that began the drag did not focus it yet
+                        let workspace = self.focused_workspace_mut()?;
+                        let mut tile = None;
+                        if let Some(idx) = workspace.container_idx_for_window(window.hwnd) {
+                            workspace.focus_container(idx);
+                            tile = workspace.latest_layout.get(idx).copied();
                         }
 
-                        if resize.left != 0 {
-                            ops.push(resize_op!(resize.left, >, OperationDirection::Left));
-                        }
+                        // The window has moved some way by the time the start of the drag is
+                        // handled, so what was read then is not where the edge was taken from
+                        let old_position = crate::live_resize::drag_origin(
+                            &old_position,
+                            &new_position,
+                            tile.as_ref(),
+                        );
 
-                        if resize.top != 0 {
-                            ops.push(resize_op!(resize.top, >, OperationDirection::Up));
-                        }
-
-                        // TODO: Determine if this is still needed
-                        let top_left_constant = BORDER_WIDTH.load(Ordering::SeqCst)
-                            + BORDER_OFFSET.load(Ordering::SeqCst);
-
-                        if resize.right != 0
-                            && (resize.left == top_left_constant || resize.left == 0)
+                        for (edge, sizing, by) in
+                            crate::live_resize::edges_moved(&old_position, &new_position)
                         {
-                            ops.push(resize_op!(resize.right, <, OperationDirection::Right));
+                            self.resize_window(edge, sizing, by, false)?;
                         }
 
-                        if resize.bottom != 0
-                            && (resize.top == top_left_constant || resize.top == 0)
-                        {
-                            ops.push(resize_op!(resize.bottom, <, OperationDirection::Down));
+                        // Also puts back a window dragged by an edge with no neighbour
+                        if new_position != old_position {
+                            self.update_focused_workspace(false, false)?;
                         }
-
-                        for (edge, sizing, delta) in ops {
-                            self.resize_window(edge, sizing, delta, true)?;
-                        }
-
-                        self.update_focused_workspace(false, false)?;
                     }
+                }
+            }
+            WindowManagerEvent::Maximize(_, window) => {
+                // The user maximized a tiled window themselves, with its button or by
+                // double-clicking its title bar: it is the window that is maximized as if it had
+                // been by the command. It may have been restored again by the time this is read,
+                // and a maximize that the command made is already known.
+                let workspace = self.focused_workspace_mut()?;
+
+                if WindowsApi::is_zoomed(window.hwnd)
+                    && workspace.maximized_window.is_none()
+                    && workspace.monocle_container.is_none()
+                    && workspace.container_idx_for_window(window.hwnd).is_some()
+                {
+                    tracing::info!("window maximized by the user");
+                    workspace.focus_container_by_window(window.hwnd)?;
+                    workspace.layer = WorkspaceLayer::Tiling;
+                    workspace.new_maximized_window()?;
+                    self.update_focused_workspace(false, false)?;
+                }
+            }
+            WindowManagerEvent::Unmaximize(_, window) => {
+                // The user restored the window that is maximized, which puts it back in its
+                // tile as the command does. A restore that the command made is already known.
+                let workspace = self.focused_workspace_mut()?;
+
+                if !WindowsApi::is_zoomed(window.hwnd)
+                    && workspace
+                        .maximized_window
+                        .is_some_and(|maximized| maximized.hwnd == window.hwnd)
+                {
+                    tracing::info!("window restored by the user");
+                    workspace.reintegrate_maximized_window()?;
+                    self.update_focused_workspace(false, false)?;
                 }
             }
             WindowManagerEvent::MouseCapture(..)
@@ -723,7 +925,7 @@ impl WindowManager {
 
         // If we unmanaged a window, it shouldn't be immediately hidden behind managed windows
         if let WindowManagerEvent::Unmanage(mut window) = event {
-            window.center(&self.focused_monitor_work_area()?)?;
+            window.center(&self.focused_monitor_work_area()?, true)?;
         }
 
         // Update list of known_hwnds and their monitor/workspace index pair
@@ -749,6 +951,120 @@ impl WindowManager {
             tracing::info!("processed: {}", event.window().to_string());
         } else {
             tracing::trace!("processed: {}", event.window().to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Checks if this window is from another unfocused workspace or is an unfocused window on a
+    /// stack container. If it is it will return the monitor/workspace index pair of this window so
+    /// that a reconciliation of that monitor/workspace can be done.
+    fn needs_reconciliation(&self, window: Window) -> color_eyre::Result<Option<(usize, usize)>> {
+        let focused_monitor_idx = self.focused_monitor_idx();
+        let focused_workspace_idx =
+            self.focused_workspace_idx_for_monitor_idx(focused_monitor_idx)?;
+
+        let focused_pair = (focused_monitor_idx, focused_workspace_idx);
+
+        let mut needs_reconciliation = None;
+
+        if let Some((m_idx, ws_idx)) = self.known_hwnds.get(&window.hwnd) {
+            if (*m_idx, *ws_idx) == focused_pair {
+                if let Some(target_workspace) = self
+                    .monitors()
+                    .get(*m_idx)
+                    .and_then(|m| m.workspaces().get(*ws_idx))
+                {
+                    if let Some(monocle_with_window) = target_workspace
+                        .monocle_container
+                        .as_ref()
+                        .and_then(|m| m.contains_window(window.hwnd).then_some(m))
+                    {
+                        if monocle_with_window.focused_window() != Some(&window) {
+                            tracing::debug!("Needs reconciliation within a monocled stack");
+                            needs_reconciliation = Some((*m_idx, *ws_idx));
+                        }
+                    } else {
+                        let c_idx = target_workspace.container_idx_for_window(window.hwnd);
+
+                        if let Some(target_container) =
+                            c_idx.and_then(|c_idx| target_workspace.containers().get(c_idx))
+                            && target_container.focused_window() != Some(&window)
+                        {
+                            tracing::debug!(
+                                "Needs reconciliation within a stack on the focused workspace"
+                            );
+                            needs_reconciliation = Some((*m_idx, *ws_idx));
+                        }
+                    }
+                }
+            } else {
+                tracing::debug!("Needs reconciliation for a different monitor/workspace pair");
+                needs_reconciliation = Some((*m_idx, *ws_idx));
+            }
+        }
+
+        Ok(needs_reconciliation)
+    }
+
+    /// When there was an `alt-tab` to a hidden window we need to perform a reconciliation, meaning
+    /// we need to update the focused monitor, workspace, container and window indices to the ones
+    /// corresponding to the window the user just alt-tabbed into.
+    fn perform_reconciliation(
+        &mut self,
+        window: Window,
+        reconciliation_pair: (usize, usize),
+    ) -> color_eyre::Result<()> {
+        let (m_idx, ws_idx) = reconciliation_pair;
+
+        tracing::debug!("performing reconciliation");
+        self.focus_monitor(m_idx)?;
+        let mouse_follows_focus = self.mouse_follows_focus;
+        let offset = self.work_area_offset;
+
+        if let Some(monitor) = self.focused_monitor_mut() {
+            if ws_idx != monitor.focused_workspace_idx() {
+                let previous_idx = monitor.focused_workspace_idx();
+                monitor.last_focused_workspace = Option::from(previous_idx);
+                monitor.focus_workspace(ws_idx)?;
+            }
+            if let Some(workspace) = monitor.focused_workspace_mut() {
+                let mut layer = WorkspaceLayer::Tiling;
+                if let Some((monocle, idx)) = workspace
+                    .monocle_container
+                    .as_mut()
+                    .and_then(|m| m.idx_for_window(window.hwnd).map(|i| (m, i)))
+                {
+                    monocle.focus_window(idx);
+                } else if workspace
+                    .floating_windows()
+                    .iter()
+                    .any(|w| w.hwnd == window.hwnd)
+                {
+                    layer = WorkspaceLayer::Floating;
+                } else if workspace
+                    .maximized_window
+                    .is_none_or(|w| w.hwnd != window.hwnd)
+                {
+                    // If the window is the maximized window do nothing, else we
+                    // reintegrate the monocle if it exists and then focus the
+                    // container
+                    if workspace.monocle_container.is_some() {
+                        tracing::info!("disabling monocle");
+                        for container in workspace.containers_mut() {
+                            container.restore();
+                        }
+                        for window in workspace.floating_windows_mut() {
+                            window.restore();
+                        }
+                        workspace.reintegrate_monocle_container()?;
+                    }
+                    workspace.focus_container_by_window(window.hwnd)?;
+                }
+                workspace.layer = layer;
+            }
+            monitor.load_focused_workspace(mouse_follows_focus)?;
+            monitor.update_focused_workspace(offset)?;
         }
 
         Ok(())

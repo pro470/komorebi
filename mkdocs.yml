@@ -49,39 +49,45 @@ plugins:
 
 nav:
   - Komorebi:
-      - index.md
-      - Design: design.md
-  - Getting started:
-      - Installation: installation.md
-      - Example configurations: example-configurations.md
-      - Troubleshooting: troubleshooting.md
-  - Usage:
-      - usage/focusing-windows.md
-      - usage/moving-windows.md
-      - usage/stacking-windows.md
-      - usage/focusing-workspaces.md
-      - usage/moving-windows-across-workspaces.md
-  - Common workflows:
-      - common-workflows/komorebi-config-home.md
-      - common-workflows/autostart.md
-      - common-workflows/animations.md
-      - common-workflows/autohotkey.md
-      - common-workflows/borders.md
-      - common-workflows/stackbar.md
-      - common-workflows/remove-gaps.md
-      - common-workflows/ignore-windows.md
-      - common-workflows/force-manage-windows.md
-      - common-workflows/floating-applications.md
-      - common-workflows/tray-and-multi-window-applications.md
-      - common-workflows/mouse-follows-focus.md
-      - common-workflows/dynamic-layout-switching.md
-      - common-workflows/set-display-index.md
-      - common-workflows/multiple-bar-instances.md
-      - common-workflows/multi-monitor-setup.md
-  - Configuration reference: https://komorebi.lgug2z.com/schema
-  - Bar reference: https://komorebi-bar.lgug2z.com/schema
+      - About:
+          - index.md
+          - design.md
+      - Getting started:
+          - Installation: installation.md
+          - Example configurations: example-configurations.md
+          - Troubleshooting: troubleshooting.md
+      - Usage:
+          - usage/focusing-windows.md
+          - usage/moving-windows.md
+          - usage/stacking-windows.md
+          - usage/focusing-workspaces.md
+          - usage/moving-windows-across-workspaces.md
+          - usage/scrolling-layout.md
+      - Komorebi Configuration:
+          - Schema: https://komorebi.lgug2z.com/schema
+      - Komorebi Bar Configuration:
+          - Schema: https://komorebi-bar.lgug2z.com/schema
+      - Common workflows:
+          - common-workflows/komorebi-config-home.md
+          - common-workflows/autostart.md
+          - common-workflows/animations.md
+          - common-workflows/autohotkey.md
+          - common-workflows/borders.md
+          - common-workflows/stackbar.md
+          - common-workflows/remove-gaps.md
+          - common-workflows/ignore-windows.md
+          - common-workflows/force-manage-windows.md
+          - common-workflows/floating-applications.md
+          - common-workflows/tray-and-multi-window-applications.md
+          - common-workflows/mouse-follows-focus.md
+          - common-workflows/dynamic-layout-switching.md
+          - common-workflows/multiple-bar-instances.md
+          - common-workflows/bar.md
+          - common-workflows/bar-widgets/systray.md
+          - common-workflows/multi-monitor-setup.md
   - CLI reference:
       - cli/quickstart.md
+      - cli/license.md
       - cli/start.md
       - cli/stop.md
       - cli/kill.md
@@ -89,9 +95,11 @@ nav:
       - cli/configuration.md
       - cli/bar-configuration.md
       - cli/whkdrc.md
+      - cli/data-directory.md
       - cli/state.md
       - cli/global-state.md
       - cli/gui.md
+      - cli/toggle-shortcuts.md
       - cli/visible-windows.md
       - cli/monitor-information.md
       - cli/query.md
@@ -106,6 +114,8 @@ nav:
       - cli/load-resize.md
       - cli/focus.md
       - cli/move.md
+      - cli/preselect-direction.md
+      - cli/cancel-preselect.md
       - cli/minimize.md
       - cli/close.md
       - cli/force-focus.md
@@ -133,6 +143,8 @@ nav:
       - cli/cycle-send-to-workspace.md
       - cli/send-to-monitor-workspace.md
       - cli/move-to-monitor-workspace.md
+      - cli/send-to-last-workspace.md
+      - cli/move-to-last-workspace.md
       - cli/focus-monitor.md
       - cli/focus-monitor-at-cursor.md
       - cli/focus-last-workspace.md
@@ -152,6 +164,7 @@ nav:
       - cli/invisible-borders.md
       - cli/global-work-area-offset.md
       - cli/monitor-work-area-offset.md
+      - cli/workspace-work-area-offset.md
       - cli/toggle-window-based-work-area-offset.md
       - cli/focused-workspace-container-padding.md
       - cli/focused-workspace-padding.md
@@ -159,8 +172,17 @@ nav:
       - cli/adjust-workspace-padding.md
       - cli/change-layout.md
       - cli/cycle-layout.md
+      - cli/scrolling-layout-columns.md
+      - cli/scrolling-layout-full-width.md
+      - cli/center-focus.md
+      - cli/expand.md
+      - cli/pan.md
+      - cli/consume.md
+      - cli/expel.md
+      - cli/toggle-column-stack.md
       - cli/flip-layout.md
       - cli/promote.md
+      - cli/promote-swap.md
       - cli/promote-focus.md
       - cli/promote-window.md
       - cli/retile.md
@@ -191,6 +213,7 @@ nav:
       - cli/toggle-float.md
       - cli/toggle-monocle.md
       - cli/toggle-maximize.md
+      - cli/toggle-lock.md
       - cli/restore-windows.md
       - cli/manage.md
       - cli/unmanage.md
@@ -202,6 +225,9 @@ nav:
       - cli/cross-monitor-move-behaviour.md
       - cli/toggle-cross-monitor-move-behaviour.md
       - cli/unmanaged-window-operation-behaviour.md
+      - cli/session-float-rule.md
+      - cli/session-float-rules.md
+      - cli/clear-session-float-rules.md
       - cli/ignore-rule.md
       - cli/manage-rule.md
       - cli/initial-workspace-rule.md

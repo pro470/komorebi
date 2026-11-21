@@ -2,21 +2,27 @@
 
 pub mod animation;
 pub mod border_manager;
+pub mod cloaked;
 pub mod com;
 #[macro_use]
 pub mod ring;
-pub mod colour;
 pub mod container;
 pub mod core;
 pub mod focus_manager;
+pub mod live_resize;
+pub mod lockable_sequence;
 pub mod monitor;
 pub mod monitor_reconciliator;
+pub mod pan;
 pub mod process_command;
 pub mod process_event;
 pub mod process_movement;
 pub mod reaper;
+pub mod scrolling;
 pub mod set_window_position;
+pub mod splash;
 pub mod stackbar_manager;
+pub mod state;
 pub mod static_config;
 pub mod styles;
 pub mod theme_manager;
@@ -29,17 +35,11 @@ pub mod windows_callbacks;
 pub mod winevent;
 pub mod winevent_listener;
 pub mod workspace;
-pub mod workspace_reconciliator;
 
 use bevy_ecs::component::Component;
 use bevy_reflect::Reflect;
-pub use colour::*;
-pub use core::*;
 use lazy_static::lazy_static;
 use monitor_reconciliator::MonitorNotification;
-pub use process_command::*;
-pub use process_event::*;
-pub use static_config::*;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fs::File;
@@ -53,6 +53,13 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+pub use core::*;
+pub use komorebi_themes::colour::*;
+pub use process_command::*;
+pub use process_event::*;
+pub use static_config::*;
+pub use win32_display_data;
 pub use window::*;
 pub use window_manager::*;
 pub use window_manager_event::*;
@@ -63,13 +70,15 @@ use crate::core::config_generation::IdWithIdentifier;
 use crate::core::config_generation::MatchingRule;
 use crate::core::config_generation::MatchingStrategy;
 use crate::core::config_generation::WorkspaceMatchingRule;
-use color_eyre::Result;
+use color_eyre::eyre;
+use crossbeam_utils::atomic::AtomicCell;
 use os_info::Version;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
+use state::State;
 use uds_windows::UnixStream;
 use which::which;
 use winreg::enums::HKEY_CURRENT_USER;
@@ -159,7 +168,15 @@ lazy_static! {
             matching_strategy: Option::from(MatchingStrategy::Equals),
         })
     ]));
-    static ref FLOATING_APPLICATIONS: Arc<Mutex<Vec<MatchingRule>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref SESSION_FLOATING_APPLICATIONS: Arc<Mutex<Vec<MatchingRule>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref FLOATING_APPLICATIONS: Arc<Mutex<Vec<MatchingRule>>> = Arc::new(Mutex::new(vec![
+        MatchingRule::Simple(IdWithIdentifier {
+            kind: ApplicationIdentifier::Exe,
+            id: String::from("komorebi-shortcuts.exe"),
+            matching_strategy: Option::from(MatchingStrategy::Equals),
+        })
+
+    ]));
     static ref PERMAIGNORE_CLASSES: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![
         "Chrome_RenderWidgetHostHWND".to_string(),
     ]));
@@ -188,26 +205,25 @@ lazy_static! {
         Arc::new(Mutex::new(HidingBehaviour::Cloak));
     pub static ref HOME_DIR: PathBuf = {
         std::env::var("KOMOREBI_CONFIG_HOME").map_or_else(|_| dirs::home_dir().expect("there is no home directory"), |home_path| {
-            let home = PathBuf::from(&home_path);
+            let home = home_path.replace_env();
 
-            if home.as_path().is_dir() {
-                home
-            } else {
-                panic!(
-                    "$Env:KOMOREBI_CONFIG_HOME is set to '{home_path}', which is not a valid directory",
-                );
-            }
+            assert!(
+                home.is_dir(),
+                "$Env:KOMOREBI_CONFIG_HOME is set to '{home_path}', which is not a valid directory"
+            );
+
+
+            home
         })
     };
     pub static ref DATA_DIR: PathBuf = dirs::data_local_dir().expect("there is no local data directory").join("komorebi");
     pub static ref AHK_EXE: String = {
         let mut ahk: String = String::from("autohotkey.exe");
 
-        if let Ok(komorebi_ahk_exe) = std::env::var("KOMOREBI_AHK_EXE") {
-            if which(&komorebi_ahk_exe).is_ok() {
+        if let Ok(komorebi_ahk_exe) = std::env::var("KOMOREBI_AHK_EXE")
+            && which(&komorebi_ahk_exe).is_ok() {
                 ahk = komorebi_ahk_exe;
             }
-        }
 
         ahk
     };
@@ -226,11 +242,18 @@ lazy_static! {
         Arc::new(Mutex::new(HashMap::new()));
 
     static ref FLOATING_WINDOW_TOGGLE_ASPECT_RATIO: Arc<Mutex<AspectRatio>> = Arc::new(Mutex::new(AspectRatio::Predefined(PredefinedAspectRatio::Widescreen)));
+
+    static ref CURRENT_VIRTUAL_DESKTOP: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+
+    pub static ref LAYOUT_DEFAULTS: Arc<Mutex<HashMap<DefaultLayout, LayoutDefaultEntry>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 }
 
 pub static DEFAULT_WORKSPACE_PADDING: AtomicI32 = AtomicI32::new(10);
 pub static DEFAULT_CONTAINER_PADDING: AtomicI32 = AtomicI32::new(10);
+pub static DEFAULT_RESIZE_DELTA: i32 = 50;
 
+pub static DEFAULT_MOUSE_FOLLOWS_FOCUS: bool = true;
 pub static INITIAL_CONFIGURATION_LOADED: AtomicBool = AtomicBool::new(false);
 pub static CUSTOM_FFM: AtomicBool = AtomicBool::new(false);
 pub static SESSION_ID: AtomicU32 = AtomicU32::new(0);
@@ -238,6 +261,34 @@ pub static SESSION_ID: AtomicU32 = AtomicU32::new(0);
 pub static REMOVE_TITLEBARS: AtomicBool = AtomicBool::new(false);
 
 pub static SLOW_APPLICATION_COMPENSATION_TIME: AtomicU64 = AtomicU64::new(20);
+
+pub static WINDOW_HANDLING_BEHAVIOUR: AtomicCell<WindowHandlingBehaviour> =
+    AtomicCell::new(WindowHandlingBehaviour::Sync);
+
+shadow_rs::shadow!(build);
+
+pub const PUBLIC_KEY: [u8; 32] = [
+    0x5a, 0x69, 0x4a, 0xe1, 0x3c, 0x4b, 0xc8, 0x4e, 0xc3, 0x79, 0x0f, 0xab, 0x27, 0x6b, 0x7e, 0xdd,
+    0x6b, 0x39, 0x6f, 0xa2, 0xc3, 0x9f, 0x3d, 0x48, 0xf2, 0x72, 0x56, 0x41, 0x1b, 0xc8, 0x08, 0xdb,
+];
+
+#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
+pub struct License {
+    #[serde(rename = "hasValidSubscription")]
+    pub has_valid_subscription: bool,
+    pub timestamp: i64,
+    #[serde(rename = "currentEndPeriod")]
+    pub current_end_period: Option<i64>,
+    pub signature: String,
+}
+
+/// A trait for types that can be marked as locked or unlocked.
+pub trait Lockable {
+    /// Returns `true` if the item is locked.
+    fn locked(&self) -> bool;
+    /// Sets the locked state of the item.
+    fn set_locked(&mut self, locked: bool) -> &mut Self;
+}
 
 #[must_use]
 pub fn current_virtual_desktop() -> Option<Vec<u8>> {
@@ -280,26 +331,37 @@ pub fn current_virtual_desktop() -> Option<Vec<u8>> {
     // the latter case, if the user desires this validation after initiating the task view, komorebi
     // should be restarted, and then when this // fn runs again for the first time, it will pick up
     // the value of CurrentVirtualDesktop and validate against it accordingly
-    current
+    current.map(|current| current.to_vec())
 }
 
-#[derive(Debug, Serialize, Deserialize, Reflect, Component)]
+#[derive(Clone, Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum NotificationEvent {
     WindowManager(WindowManagerEvent),
     Socket(SocketMessage),
     Monitor(MonitorNotification),
+    VirtualDesktop(VirtualDesktopNotification),
 }
 
-#[derive(Debug, Serialize, Deserialize, Reflect, Component)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub enum VirtualDesktopNotification {
+    EnteredAssociatedVirtualDesktop,
+    LeftAssociatedVirtualDesktop,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Notification {
     pub event: NotificationEvent,
     pub state: State,
 }
 
-pub fn notify_subscribers(notification: Notification, state_has_been_modified: bool) -> Result<()> {
+pub fn notify_subscribers(
+    notification: Notification,
+    state_has_been_modified: bool,
+) -> eyre::Result<()> {
     let is_override_event = matches!(
         notification.event,
         NotificationEvent::Socket(SocketMessage::AddSubscriberSocket(_))
@@ -380,7 +442,7 @@ pub fn notify_subscribers(notification: Notification, state_has_been_modified: b
     Ok(())
 }
 
-pub fn load_configuration() -> Result<()> {
+pub fn load_configuration() -> eyre::Result<()> {
     let config_pwsh = HOME_DIR.join("komorebi.ps1");
     let config_ahk = HOME_DIR.join("komorebi.ahk");
 

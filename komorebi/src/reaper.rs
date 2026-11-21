@@ -1,13 +1,15 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
-use crate::border_manager;
-use crate::notify_subscribers;
-use crate::winevent::WinEvent;
+use crate::DATA_DIR;
+use crate::HIDING_BEHAVIOUR;
+use crate::HidingBehaviour;
 use crate::NotificationEvent;
 use crate::Window;
 use crate::WindowManager;
 use crate::WindowManagerEvent;
-use crate::DATA_DIR;
+use crate::border_manager;
+use crate::notify_subscribers;
+use crate::winevent::WinEvent;
 
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
@@ -53,13 +55,15 @@ pub fn listen_for_notifications(
 ) {
     watch_for_orphans(known_hwnds);
 
-    std::thread::spawn(move || loop {
-        match handle_notifications(wm.clone()) {
-            Ok(()) => {
-                tracing::warn!("restarting finished thread");
-            }
-            Err(error) => {
-                tracing::warn!("restarting failed thread: {}", error);
+    std::thread::spawn(move || {
+        loop {
+            match handle_notifications(wm.clone()) {
+                Ok(()) => {
+                    tracing::warn!("restarting finished thread");
+                }
+                Err(error) => {
+                    tracing::warn!("restarting failed thread: {}", error);
+                }
             }
         }
     });
@@ -148,16 +152,18 @@ fn watch_for_orphans(known_hwnds: HashMap<isize, (usize, usize)>) {
         *cache = known_hwnds;
     }
 
-    std::thread::spawn(move || loop {
-        match find_orphans() {
-            Ok(()) => {
-                tracing::warn!("restarting finished thread");
-            }
-            Err(error) => {
-                if cfg!(debug_assertions) {
-                    tracing::error!("restarting failed thread: {:?}", error)
-                } else {
-                    tracing::error!("restarting failed thread: {}", error)
+    std::thread::spawn(move || {
+        loop {
+            match find_orphans() {
+                Ok(()) => {
+                    tracing::warn!("restarting finished thread");
+                }
+                Err(error) => {
+                    if cfg!(debug_assertions) {
+                        tracing::error!("restarting failed thread: {:?}", error)
+                    } else {
+                        tracing::error!("restarting failed thread: {}", error)
+                    }
                 }
             }
         }
@@ -169,6 +175,7 @@ fn find_orphans() -> color_eyre::Result<()> {
 
     loop {
         std::thread::sleep(Duration::from_millis(20));
+        let hiding_behaviour = *HIDING_BEHAVIOUR.lock();
 
         let mut cache = HWNDS_CACHE.lock();
         let mut orphan_hwnds = HashMap::new();
@@ -176,14 +183,20 @@ fn find_orphans() -> color_eyre::Result<()> {
         for (hwnd, (m_idx, w_idx)) in cache.iter() {
             let window = Window::from(*hwnd);
 
+            #[allow(deprecated)]
             if !window.is_window()
-                // This one is a hack because WINWORD.EXE is an absolute trainwreck of an app
-                // when multiple docs are open, it keeps open an invisible window, with WS_EX_LAYERED
-                // (A STYLE THAT THE REGULAR WINDOWS NEED IN ORDER TO BE MANAGED!) when one of the
-                // docs is closed
-                //
-                // I hate every single person who worked on Microsoft Office 365, especially Word
-                || !window.is_visible()
+                || (
+                    // This one is a hack because WINWORD.EXE is an absolute trainwreck of an app
+                    // when multiple docs are open, it keeps open an invisible window, with WS_EX_LAYERED
+                    // (A STYLE THAT THE REGULAR WINDOWS NEED IN ORDER TO BE MANAGED!) when one of the
+                    // docs is closed
+                    //
+                    // I hate every single person who worked on Microsoft Office 365, especially Word
+                    !window.is_visible()
+                    // We cannot execute this lovely hack if the user is using HidingBehaviour::Hide because
+                    // it will result in legitimate hidden, non-visible windows being yeeted from the state
+                    && !matches!(hiding_behaviour, HidingBehaviour::Hide)
+                )
             {
                 orphan_hwnds.insert(window.hwnd, (*m_idx, *w_idx));
             }

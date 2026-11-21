@@ -6,7 +6,6 @@ use crate::widgets::widget::BarWidget;
 use chrono::Local;
 use chrono::NaiveTime;
 use chrono_tz::Tz;
-use eframe::egui::text::LayoutJob;
 use eframe::egui::Align;
 use eframe::egui::Context;
 use eframe::egui::CornerRadius;
@@ -16,6 +15,7 @@ use eframe::egui::Stroke;
 use eframe::egui::TextFormat;
 use eframe::egui::Ui;
 use eframe::egui::Vec2;
+use eframe::egui::text::LayoutJob;
 use eframe::epaint::StrokeKind;
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -72,6 +72,7 @@ lazy_static! {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Time widget configuration
 pub struct TimeConfig {
     /// Enable the Time widget
     pub enable: bool,
@@ -92,7 +93,7 @@ pub struct TimeConfig {
     ///}
     /// ```
     pub timezone: Option<String>,
-    /// Change the icon depending on the time. The default icon is used between 8:30 and 12:00. (default: false)
+    /// Change the icon depending on the time. The default icon is used between 8:30 and 12:00
     pub changing_icon: Option<bool>,
 }
 
@@ -119,6 +120,7 @@ impl From<TimeConfig> for Time {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+/// Time format
 pub enum TimeFormat {
     /// Twelve-hour format (with seconds)
     TwelveHour,
@@ -133,6 +135,7 @@ pub enum TimeFormat {
     /// Twenty-four-hour format displayed as a binary clock with rectangles (with seconds) (https://en.wikipedia.org/wiki/Binary_clock)
     BinaryRectangle,
     /// Custom format (https://docs.rs/chrono/latest/chrono/format/strftime/index.html)
+    #[cfg_attr(feature = "schemars", schemars(title = "Custom"))]
     Custom(String),
 }
 
@@ -209,7 +212,7 @@ impl Time {
                             Some(dt.time()),
                         )
                     }
-                    Err(_) => (format!("Invalid timezone: {:?}", timezone), None),
+                    Err(_) => (format!("Invalid timezone: {timezone:?}"), None),
                 },
                 None => {
                     let dt = Local::now();
@@ -313,7 +316,7 @@ impl Time {
         let (response, painter) =
             ui.allocate_painter(Vec2::new(width, full_height + offset * 2.0), Sense::hover());
         let color = ctx.style().visuals.text_color();
-        let stroke = Stroke::new(1.0, color);
+        let stroke = Stroke::new(1.0_f32, color);
 
         let round_all = CornerRadius::same((response.rect.width() * 0.1) as u8);
         let round_top = CornerRadius {

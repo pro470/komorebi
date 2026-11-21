@@ -29,6 +29,36 @@ Tiling Window Management for Windows.
 
 ![screenshot](https://user-images.githubusercontent.com/13164844/184027064-f5a6cec2-2865-4d65-a549-a1f1da589abf.png)
 
+## Note: Students using devices enrolled in mobile device management (MDM)
+
+Your usage still falls under the [Komorebi License 2.0.0](./LICENSE.md).
+
+You can email me at the address I sign my commits with (add `.patch` to the end
+of any commit URL on GitHub to find it) from the address associated with your
+institution with the subject "komorebi - student with an MDM device", and I will
+be able to remove the splash intended for corporate users, whose usage falls
+under the [Individual Commercial Use
+License](https://lgug2z.com/software/komorebi).
+
+This is currently a manual process - most days this shouldn't take more than
+12h, and you will receive an email reply from me when the process is complete.
+
+If you haven't had a reply to your email within 24h you can reach out to me on
+Discord.
+
+## Note: Unexpected mobile device management (MDM) detection prompts
+
+You have most likely unintentionally enrolled your device in "Bring Your Own
+Device" (BYOD) MDM. You can confirm if this is the case by running `dsregcmd
+/status` and then take the appropriate steps to remove the MDM profile and take
+back full control of your system.
+
+If you need help doing this you can ask on Discord.
+
+## Note: komorebi for Mac
+
+komorebi for Mac lives [here](https://github.com/LGUG2Z/komorebi-for-mac) :)
+
 ## Overview
 
 _komorebi_ is a tiling window manager that works as an extension to Microsoft's
@@ -49,7 +79,7 @@ Please refer to the [documentation](https://lgug2z.github.io/komorebi) for instr
 to [install](https://lgug2z.github.io/komorebi/installation.html) and
 [configure](https://lgug2z.github.io/komorebi/example-configurations.html)
 _komorebi_, [common workflows](https://lgug2z.github.io/komorebi/common-workflows/komorebi-config-home.html), a complete
-[configuration schema reference](https://komorebi.lgug2z.com/schema) and a
+[configuration schema reference](https://komorebi-starlight.lgug2z.workers.dev/reference/komorebi-windows/) and a
 complete [CLI reference](https://lgug2z.github.io/komorebi/cli/quickstart.html).
 
 ## Community
@@ -74,7 +104,7 @@ showcases the many awesome projects that exist in the _komorebi_ ecosystem.
 `komorebi` is [educational source
 software](https://lgug2z.com/articles/educational-source-software/).
 
-`komorebi` is licensed under the [Komorebi 1.0.0
+`komorebi` is licensed under the [Komorebi 2.0.0
 license](https://github.com/LGUG2Z/komorebi-license), which is a fork of the
 [PolyForm Strict 1.0.0
 license](https://polyformproject.org/licenses/strict/1.0.0). On a high level
@@ -85,7 +115,7 @@ hard-forks) based on the software.
 Anyone is free to make their own fork of `komorebi` with changes intended either
 for personal use or for integration back upstream via pull requests.
 
-The [Komorebi 1.0.0 License](https://github.com/LGUG2Z/komorebi-license) does
+The [Komorebi 2.0.0 License](https://github.com/LGUG2Z/komorebi-license) does
 not permit any kind of commercial use (i.e. using `komorebi` at work).
 
 ## Sponsorship for Personal Use
@@ -146,7 +176,8 @@ video will answer the majority of your questions.
 
 [@amnweb](https://github.com/amnweb) showing _komorebi_ `v0.1.28` running on Windows 11 with window borders,
 unfocused window transparency and animations enabled, using a custom status bar integrated using
-_komorebi_'s [Window Manager Event Subscriptions](https://github.com/LGUG2Z/komorebi?tab=readme-ov-file#window-manager-event-subscriptions).
+_komorebi_'
+s [Window Manager Event Subscriptions](https://github.com/LGUG2Z/komorebi?tab=readme-ov-file#window-manager-event-subscriptions).
 
 https://github.com/LGUG2Z/komorebi/assets/13164844/21be8dc4-fa76-4f70-9b37-1d316f4b40c2
 
@@ -393,7 +424,7 @@ every `WindowManagerEvent` and `SocketMessage` handled by `komorebi` in a Rust c
 Below is a simple example of how to use `komorebi-client` in a basic Rust application.
 
 ```rust
-// komorebi-client = { git = "https://github.com/LGUG2Z/komorebi", tag = "v0.1.35"}
+// komorebi-client = { git = "https://github.com/LGUG2Z/komorebi" }
 
 use anyhow::Result;
 use komorebi_client::Notification;

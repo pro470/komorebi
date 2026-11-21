@@ -1,109 +1,115 @@
-use bevy_ecs::component::Component;
-use bevy_reflect::Reflect;
-use color_eyre::eyre::anyhow;
-use color_eyre::Result;
-use getset::CopyGetters;
-use getset::Getters;
-use getset::MutGetters;
-use getset::Setters;
-use serde::Deserialize;
-use serde::Serialize;
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
 
+use crate::DATA_DIR;
+use crate::DEFAULT_CONTAINER_PADDING;
+use crate::DEFAULT_WORKSPACE_PADDING;
+use crate::FloatingLayerBehaviour;
+use crate::HIDDEN_HWNDS;
+use crate::INITIAL_CONFIGURATION_LOADED;
+use crate::KomorebiTheme;
+use crate::NO_TITLEBAR;
+use crate::REGEX_IDENTIFIERS;
+use crate::REMOVE_TITLEBARS;
+use crate::SocketMessage;
+use crate::Wallpaper;
+use crate::WindowContainerBehaviour;
+use crate::animation::engine::AnimationBatch;
 use crate::border_manager;
+use crate::container::Container;
 use crate::core::Axis;
 use crate::core::CustomLayout;
 use crate::core::CycleDirection;
 use crate::core::DefaultLayout;
+use crate::core::InitialWindowPlacementRules;
 use crate::core::Layout;
+use crate::core::LayoutDefaultEntry;
+use crate::core::LayoutOptions;
 use crate::core::OperationDirection;
+use crate::core::PlacementMatchingRules;
+use crate::core::PlacementTarget;
 use crate::core::Rect;
-
-use crate::border_manager::BORDER_OFFSET;
-use crate::border_manager::BORDER_WIDTH;
-use crate::container::Container;
+use crate::core::WindowKind;
+use crate::core::WindowPlacement;
+use crate::lockable_sequence::LockableSequence;
 use crate::ring::Ring;
 use crate::should_act;
+use crate::should_act_individual;
 use crate::stackbar_manager;
 use crate::stackbar_manager::STACKBAR_TAB_HEIGHT;
 use crate::static_config::WorkspaceConfig;
 use crate::window::Window;
 use crate::window::WindowDetails;
 use crate::windows_api::WindowsApi;
-use crate::WindowContainerBehaviour;
-use crate::DEFAULT_CONTAINER_PADDING;
-use crate::DEFAULT_WORKSPACE_PADDING;
-use crate::INITIAL_CONFIGURATION_LOADED;
-use crate::NO_TITLEBAR;
-use crate::REGEX_IDENTIFIERS;
-use crate::REMOVE_TITLEBARS;
+use color_eyre::eyre;
+use color_eyre::eyre::OptionExt;
+use komorebi_scrolling::ScrollingSpace;
+use komorebi_themes::Base16ColourPalette;
+use komorebi_themes::KomorebiThemeCustom as Custom;
+use serde::Deserialize;
+use serde::Serialize;
+use uds_windows::UnixStream;
 
 #[allow(clippy::struct_field_names)]
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Getters,
-    CopyGetters,
-    MutGetters,
-    Setters,
-    PartialEq,
-    Reflect,
-    Component,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Workspace {
-    #[getset(get = "pub", set = "pub")]
     pub name: Option<String>,
     pub containers: Ring<Container>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub monocle_container: Option<Container>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[getset(get_copy = "pub", set = "pub")]
     pub monocle_container_restore_idx: Option<usize>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub maximized_window: Option<Window>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[getset(get_copy = "pub", set = "pub")]
     pub maximized_window_restore_idx: Option<usize>,
-    #[getset(get = "pub", get_mut = "pub")]
-    pub floating_windows: Vec<Window>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
+    pub floating_windows: Ring<Window>,
     pub layout: Layout,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
+    pub layout_options: Option<LayoutOptions>,
     pub layout_rules: Vec<(usize, Layout)>,
-    #[getset(get_copy = "pub", set = "pub")]
+    /// Threshold-based layout options rules (container_count >= threshold -> use these options).
+    /// Sorted by threshold ascending at load time.
+    #[serde(default)]
+    pub layout_options_rules: Vec<(usize, LayoutOptions)>,
+    /// Cached per-layout defaults from the global `layout_defaults` config setting.
+    /// Pre-sorted at config load time; used as fallback when workspace has no overrides.
+    #[serde(skip)]
+    pub(crate) layout_defaults_cache: HashMap<DefaultLayout, CachedLayoutDefault>,
+    pub work_area_offset_rules: Vec<(usize, Rect)>,
     pub layout_flip: Option<Axis>,
-    #[getset(get_copy = "pub", set = "pub")]
     pub workspace_padding: Option<i32>,
-    #[getset(get_copy = "pub", set = "pub")]
     pub container_padding: Option<i32>,
-    #[getset(get = "pub", set = "pub")]
     pub latest_layout: Vec<Rect>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub resize_dimensions: Vec<Option<Rect>>,
-    #[getset(get = "pub", set = "pub")]
     pub tile: bool,
-    #[getset(get_copy = "pub", set = "pub")]
+    pub work_area_offset: Option<Rect>,
     pub apply_window_based_work_area_offset: bool,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub window_container_behaviour: Option<WindowContainerBehaviour>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub window_container_behaviour_rules: Option<Vec<(usize, WindowContainerBehaviour)>>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub float_override: Option<bool>,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
+    #[serde(skip)]
     pub globals: WorkspaceGlobals,
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     pub layer: WorkspaceLayer,
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
+    pub wallpaper: Option<Wallpaper>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[getset(get = "pub", set = "pub")]
     pub workspace_config: Option<WorkspaceConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preselected_container_idx: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub promotion_swap_container_idx: Option<usize>,
+    /// Initial window placement rules that determine where new tiled windows are placed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_window_placement_rules: Option<InitialWindowPlacementRules>,
+    /// The strip of columns that the Scrolling layout lays containers out in
+    #[serde(skip)]
+    #[cfg_attr(feature = "schemars", schemars(skip))]
+    pub(crate) scrolling: Option<ScrollingSpace<String>>,
 }
 
 #[derive(
@@ -126,6 +132,7 @@ impl Display for WorkspaceLayer {
 }
 
 impl_ring_elements!(Workspace, Container);
+impl_ring_elements!(Workspace, Window, "floating_window");
 
 impl Default for Workspace {
     fn default() -> Self {
@@ -136,22 +143,33 @@ impl Default for Workspace {
             maximized_window: None,
             maximized_window_restore_idx: None,
             monocle_container_restore_idx: None,
-            floating_windows: Vec::default(),
+            floating_windows: Ring::default(),
             layout: Layout::Default(DefaultLayout::BSP),
+            layout_options: None,
             layout_rules: vec![],
+            layout_options_rules: vec![],
+            layout_defaults_cache: HashMap::new(),
+            work_area_offset_rules: vec![],
             layout_flip: None,
             workspace_padding: Option::from(DEFAULT_WORKSPACE_PADDING.load(Ordering::SeqCst)),
             container_padding: Option::from(DEFAULT_CONTAINER_PADDING.load(Ordering::SeqCst)),
             latest_layout: vec![],
             resize_dimensions: vec![],
             tile: true,
+            work_area_offset: None,
             apply_window_based_work_area_offset: true,
             window_container_behaviour: None,
             window_container_behaviour_rules: None,
             float_override: None,
             layer: Default::default(),
+            floating_layer_behaviour: Default::default(),
             globals: Default::default(),
             workspace_config: None,
+            wallpaper: None,
+            preselected_container_idx: None,
+            promotion_swap_container_idx: None,
+            initial_window_placement_rules: None,
+            scrolling: None,
         }
     }
 }
@@ -164,53 +182,86 @@ pub enum WorkspaceWindowLocation {
     Floating(usize),         // idx in floating_windows
 }
 
-#[derive(
-    Debug,
-    Default,
-    Copy,
-    Clone,
-    Serialize,
-    Deserialize,
-    Getters,
-    CopyGetters,
-    MutGetters,
-    Setters,
-    PartialEq,
-    Reflect,
-    Component,
-)]
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Reflect, Component)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 /// Settings setup either by the parent monitor or by the `WindowManager`
 pub struct WorkspaceGlobals {
     pub container_padding: Option<i32>,
     pub workspace_padding: Option<i32>,
+    pub border_width: i32,
+    pub border_offset: i32,
     pub work_area: Rect,
     pub work_area_offset: Option<Rect>,
     pub window_based_work_area_offset: Option<Rect>,
     pub window_based_work_area_offset_limit: isize,
+    pub floating_layer_behaviour: Option<FloatingLayerBehaviour>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Cached per-layout default options (pre-sorted rules) derived from the global `layout_defaults`.
+pub(crate) struct CachedLayoutDefault {
+    pub layout_options: Option<LayoutOptions>,
+    /// Threshold-based rules, sorted by threshold ascending at load time
+    pub layout_options_rules: Vec<(usize, LayoutOptions)>,
+}
+
+/// Convert an optional HashMap of threshold-based layout options rules into a Vec sorted by
+/// threshold ascending.
+fn sorted_layout_options_rules(
+    rules: Option<&HashMap<usize, LayoutOptions>>,
+) -> Vec<(usize, LayoutOptions)> {
+    match rules {
+        Some(rules) => {
+            let mut sorted: Vec<(usize, LayoutOptions)> =
+                rules.iter().map(|(t, o)| (*t, *o)).collect();
+            sorted.sort_by_key(|(t, _)| *t);
+            sorted
+        }
+        None => vec![],
+    }
+}
+
+/// Find the highest matching threshold rule for the given container count.
+/// Rules must be sorted by threshold ascending.
+fn resolve_threshold_match(
+    rules: &[(usize, LayoutOptions)],
+    container_count: usize,
+) -> Option<LayoutOptions> {
+    rules
+        .iter()
+        .rev()
+        .find(|(threshold, _)| container_count >= *threshold)
+        .map(|(_, opts)| *opts)
 }
 
 impl Workspace {
-    pub fn load_static_config(&mut self, config: &WorkspaceConfig) -> Result<()> {
+    pub fn load_static_config(
+        &mut self,
+        config: &WorkspaceConfig,
+        layout_defaults: Option<&HashMap<DefaultLayout, LayoutDefaultEntry>>,
+    ) -> eyre::Result<()> {
         self.name = Option::from(config.name.clone());
 
-        self.set_container_padding(config.container_padding);
+        self.container_padding = config.container_padding;
 
-        self.set_workspace_padding(config.workspace_padding);
+        self.workspace_padding = config.workspace_padding;
 
         if let Some(layout) = &config.layout {
             self.layout = Layout::Default(*layout);
-            self.tile = true;
         }
 
+        #[allow(deprecated)]
         if let Some(pathbuf) = &config.custom_layout {
             let layout = CustomLayout::from_path(pathbuf)?;
             self.layout = Layout::Custom(layout);
-            self.tile = true;
         }
 
-        if config.custom_layout.is_none() && config.layout.is_none() {
-            self.tile = false;
+        #[allow(deprecated)]
+        {
+            self.tile = !(config.custom_layout.is_none()
+                && config.layout.is_none()
+                && config.tile.is_none()
+                || config.tile.is_some_and(|tile| !tile));
         }
 
         let mut all_layout_rules = vec![];
@@ -223,8 +274,9 @@ impl Workspace {
             self.tile = true;
         }
 
-        self.set_layout_rules(all_layout_rules.clone());
+        self.layout_rules = all_layout_rules.clone();
 
+        #[allow(deprecated)]
         if let Some(layout_rules) = &config.custom_layout_rules {
             for (count, pathbuf) in layout_rules {
                 let rule = CustomLayout::from_path(pathbuf)?;
@@ -233,18 +285,28 @@ impl Workspace {
 
             all_layout_rules.sort_by_key(|(i, _)| *i);
             self.tile = true;
-            self.set_layout_rules(all_layout_rules);
+            self.layout_rules = all_layout_rules;
         }
 
-        self.set_apply_window_based_work_area_offset(
-            config.apply_window_based_work_area_offset.unwrap_or(true),
-        );
+        let mut all_work_area_offset_rules = vec![];
+        if let Some(work_area_offset_rules) = &config.work_area_offset_rules {
+            for (count, rect) in work_area_offset_rules {
+                all_work_area_offset_rules.push((*count, *rect));
+            }
+            all_work_area_offset_rules.sort_by_key(|(i, _)| *i);
+            self.work_area_offset_rules = all_work_area_offset_rules;
+        }
 
-        self.set_window_container_behaviour(config.window_container_behaviour);
+        self.work_area_offset = config.work_area_offset;
+
+        self.apply_window_based_work_area_offset =
+            config.apply_window_based_work_area_offset.unwrap_or(true);
+
+        self.window_container_behaviour = config.window_container_behaviour;
 
         if let Some(window_container_behaviour_rules) = &config.window_container_behaviour_rules {
             if window_container_behaviour_rules.is_empty() {
-                self.set_window_container_behaviour_rules(None);
+                self.window_container_behaviour_rules = None;
             } else {
                 let mut all_rules = vec![];
                 for (count, behaviour) in window_container_behaviour_rules {
@@ -252,30 +314,98 @@ impl Workspace {
                 }
 
                 all_rules.sort_by_key(|(i, _)| *i);
-                self.set_window_container_behaviour_rules(Some(all_rules));
+                self.window_container_behaviour_rules = Some(all_rules);
             }
         } else {
-            self.set_window_container_behaviour_rules(None);
+            self.window_container_behaviour_rules = None;
         }
 
-        self.set_float_override(config.float_override);
-        self.set_layout_flip(config.layout_flip);
+        self.float_override = config.float_override;
+        self.layout_flip = config.layout_flip;
+        self.floating_layer_behaviour = config.floating_layer_behaviour;
+        self.wallpaper = config.wallpaper.clone();
 
-        self.set_workspace_config(Some(config.clone()));
+        // Load layout options directly (LayoutOptions is used in both config and runtime)
+        self.layout_options = config.layout_options;
+        self.initial_window_placement_rules = config.initial_window_placement_rules.clone();
+
+        // Load threshold-based layout options rules, sorted by threshold ascending
+        self.layout_options_rules =
+            sorted_layout_options_rules(config.layout_options_rules.as_ref());
+
+        tracing::debug!(
+            "Workspace '{}' loaded layout_options: {:?}, layout_options_rules: {} entries",
+            self.name.as_deref().unwrap_or("unnamed"),
+            self.layout_options,
+            self.layout_options_rules.len(),
+        );
+
+        // Cache per-layout defaults from global layout_defaults, pre-sorting rules
+        self.layout_defaults_cache = if let Some(defaults) = layout_defaults {
+            defaults
+                .iter()
+                .map(|(layout, entry)| {
+                    (
+                        *layout,
+                        CachedLayoutDefault {
+                            layout_options: entry.layout_options,
+                            layout_options_rules: sorted_layout_options_rules(
+                                entry.layout_options_rules.as_ref(),
+                            ),
+                        },
+                    )
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
+        self.workspace_config = Some(config.clone());
 
         Ok(())
+    }
+
+    /// Compute effective layout options using the complete-replacement cascade:
+    ///
+    /// If the workspace defines EITHER `layout_options` OR `layout_options_rules`,
+    /// it completely replaces the global `layout_defaults` for this layout.
+    /// Global defaults are only used when the workspace has NEITHER setting.
+    ///
+    /// Within the effective source (workspace or global):
+    ///   1. Try threshold match from rules (highest matching threshold wins)
+    ///   2. If a rule matches -> use it (full replacement of base)
+    ///   3. Else -> use the base `layout_options`
+    pub(crate) fn effective_layout_options(&self) -> Option<LayoutOptions> {
+        let container_count = self.containers().len();
+
+        let has_workspace_overrides =
+            self.layout_options.is_some() || !self.layout_options_rules.is_empty();
+
+        let (effective_base, effective_rules): (Option<LayoutOptions>, &[(usize, LayoutOptions)]) =
+            if has_workspace_overrides {
+                (self.layout_options, &self.layout_options_rules)
+            } else {
+                match &self.layout {
+                    Layout::Default(dl) => match self.layout_defaults_cache.get(dl) {
+                        Some(entry) => (entry.layout_options, &entry.layout_options_rules),
+                        None => (None, &[]),
+                    },
+                    Layout::Custom(_) => (None, &[]),
+                }
+            };
+
+        resolve_threshold_match(effective_rules, container_count).or(effective_base)
     }
 
     pub fn hide(&mut self, omit: Option<isize>) {
         for window in self.floating_windows_mut().iter_mut().rev() {
             let mut should_hide = omit.is_none();
 
-            if !should_hide {
-                if let Some(omit) = omit {
-                    if omit != window.hwnd {
-                        should_hide = true
-                    }
-                }
+            if !should_hide
+                && let Some(omit) = omit
+                && omit != window.hwnd
+            {
+                should_hide = true
             }
 
             if should_hide {
@@ -287,32 +417,157 @@ impl Workspace {
             container.hide(omit)
         }
 
-        if let Some(window) = self.maximized_window() {
+        if let Some(window) = self.maximized_window {
             window.hide();
         }
 
-        if let Some(container) = self.monocle_container_mut() {
+        if let Some(container) = &self.monocle_container {
             container.hide(omit)
         }
     }
 
-    pub fn restore(&mut self, mouse_follows_focus: bool) -> Result<()> {
-        if let Some(container) = self.monocle_container() {
-            if let Some(window) = container.focused_window() {
-                container.restore();
-                window.focus(mouse_follows_focus)?;
-                return Ok(());
+    pub fn apply_wallpaper(
+        &self,
+        hmonitor: isize,
+        monitor_wp: &Option<Wallpaper>,
+    ) -> eyre::Result<()> {
+        if let Some(wallpaper) = self.wallpaper.as_ref().or(monitor_wp.as_ref()) {
+            if let Err(error) = WindowsApi::set_wallpaper(&wallpaper.path, hmonitor) {
+                tracing::error!("failed to set wallpaper: {error}");
             }
+
+            if wallpaper.generate_theme.unwrap_or(true) {
+                let variant = wallpaper
+                    .theme_options
+                    .as_ref()
+                    .and_then(|t| t.theme_variant)
+                    .unwrap_or_default();
+
+                let cached_palette = DATA_DIR.join(format!(
+                    "{}.base16.{variant}.json",
+                    wallpaper
+                        .path
+                        .file_name()
+                        .unwrap_or(OsStr::new("tmp"))
+                        .to_string_lossy()
+                ));
+
+                let mut base16_palette = None;
+
+                if cached_palette.is_file() {
+                    tracing::info!(
+                        "colour palette for wallpaper {} found in cache",
+                        cached_palette.display()
+                    );
+
+                    // this code is VERY slow on debug builds - should only be a one-time issue when loading
+                    // an uncached wallpaper
+                    if let Ok(palette) = serde_json::from_str::<Base16ColourPalette>(
+                        &std::fs::read_to_string(&cached_palette)?,
+                    ) {
+                        base16_palette = Some(palette);
+                    }
+                };
+
+                if base16_palette.is_none() {
+                    base16_palette =
+                        komorebi_themes::generate_base16_palette(&wallpaper.path, variant).ok();
+
+                    std::fs::write(
+                        &cached_palette,
+                        serde_json::to_string_pretty(&base16_palette)?,
+                    )?;
+
+                    tracing::info!(
+                        "colour palette for wallpaper {} cached",
+                        cached_palette.display()
+                    );
+                }
+
+                if let Some(palette) = base16_palette {
+                    let komorebi_theme = KomorebiTheme::Custom(Custom {
+                        colours: Box::new(palette),
+                        single_border: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.single_border),
+                        stack_border: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.stack_border),
+                        monocle_border: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.monocle_border),
+                        floating_border: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.floating_border),
+                        unfocused_border: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.unfocused_border),
+                        unfocused_locked_border: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.unfocused_locked_border),
+                        stackbar_focused_text: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.stackbar_focused_text),
+                        stackbar_unfocused_text: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.stackbar_unfocused_text),
+                        stackbar_background: wallpaper
+                            .theme_options
+                            .as_ref()
+                            .and_then(|o| o.stackbar_background),
+                        bar_accent: wallpaper.theme_options.as_ref().and_then(|o| o.bar_accent),
+                    });
+
+                    let bytes = SocketMessage::Theme(Box::new(komorebi_theme)).as_bytes()?;
+
+                    let socket = DATA_DIR.join("komorebi.sock");
+                    match UnixStream::connect(socket) {
+                        Ok(mut stream) => {
+                            if let Err(error) = stream.write_all(&bytes) {
+                                tracing::error!("failed to send theme update message: {error}")
+                            }
+                        }
+                        Err(error) => {
+                            tracing::error!("{error}")
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn restore(
+        &mut self,
+        mouse_follows_focus: bool,
+        hmonitor: isize,
+        monitor_wp: &Option<Wallpaper>,
+    ) -> eyre::Result<()> {
+        if let Some(container) = &self.monocle_container
+            && let Some(window) = container.focused_window()
+        {
+            container.restore();
+            window.focus(mouse_follows_focus)?;
+            return self.apply_wallpaper(hmonitor, monitor_wp);
         }
 
         let idx = self.focused_container_idx();
         let mut to_focus = None;
 
         for (i, container) in self.containers_mut().iter_mut().enumerate() {
-            if let Some(window) = container.focused_window_mut() {
-                if idx == i {
-                    to_focus = Option::from(*window);
-                }
+            if let Some(window) = container.focused_window_mut()
+                && idx == i
+            {
+                to_focus = Option::from(*window);
             }
 
             container.restore();
@@ -330,42 +585,68 @@ impl Workspace {
         // Maximised windows and floating windows should always be drawn at the top of the Z order
         // when switching to a workspace
         if let Some(window) = to_focus {
-            if self.maximized_window().is_none() && matches!(self.layer, WorkspaceLayer::Tiling) {
+            if self.maximized_window.is_none() && matches!(self.layer, WorkspaceLayer::Tiling) {
                 window.focus(mouse_follows_focus)?;
-            } else if let Some(maximized_window) = self.maximized_window() {
+            } else if let Some(maximized_window) = self.maximized_window {
                 maximized_window.restore();
                 maximized_window.focus(mouse_follows_focus)?;
-            } else if let Some(floating_window) = self.floating_windows().first() {
+            } else if let Some(floating_window) = self.focused_floating_window() {
                 floating_window.focus(mouse_follows_focus)?;
             }
-        } else if let Some(maximized_window) = self.maximized_window() {
+        } else if let Some(maximized_window) = self.maximized_window {
             maximized_window.restore();
             maximized_window.focus(mouse_follows_focus)?;
-        } else if let Some(floating_window) = self.floating_windows().first() {
+        } else if let Some(floating_window) = self.focused_floating_window() {
             floating_window.focus(mouse_follows_focus)?;
         }
 
-        Ok(())
+        self.apply_wallpaper(hmonitor, monitor_wp)
     }
 
-    pub fn update(&mut self) -> Result<()> {
+    pub fn update(&mut self) -> eyre::Result<()> {
         if !INITIAL_CONFIGURATION_LOADED.load(Ordering::SeqCst) {
             return Ok(());
         }
 
+        // every window that moves in this pass is animated together
+        let _animations = AnimationBatch::begin();
+
+        // make sure we are never holding on to empty containers
+        self.containers_mut()
+            .retain(|c| c.is_preselect() || !c.windows().is_empty());
+
         let container_padding = self
-            .container_padding()
-            .or(self.globals().container_padding)
+            .container_padding
+            .or(self.globals.container_padding)
             .unwrap_or_default();
         let workspace_padding = self
-            .workspace_padding()
-            .or(self.globals().workspace_padding)
+            .workspace_padding
+            .or(self.globals.workspace_padding)
             .unwrap_or_default();
-        let work_area = self.globals().work_area;
-        let work_area_offset = self.globals().work_area_offset;
-        let window_based_work_area_offset = self.globals().window_based_work_area_offset;
-        let window_based_work_area_offset_limit =
-            self.globals().window_based_work_area_offset_limit;
+        let border_width = self.globals.border_width;
+        let border_offset = self.globals.border_offset;
+        let work_area = self.globals.work_area;
+        let window_based_work_area_offset = self.globals.window_based_work_area_offset;
+        let window_based_work_area_offset_limit = self.globals.window_based_work_area_offset_limit;
+        let mut rules_work_area_offset = None;
+
+        if !self.work_area_offset_rules.is_empty() {
+            let count = if self.monocle_container.is_some() {
+                1
+            } else {
+                self.containers().len()
+            };
+
+            for (threshold, work_area_offset_rule) in &self.work_area_offset_rules {
+                if count >= *threshold {
+                    rules_work_area_offset = Some(*work_area_offset_rule);
+                }
+            }
+        };
+
+        let work_area_offset = rules_work_area_offset
+            .or(self.work_area_offset)
+            .or(self.globals.work_area_offset);
 
         let mut adjusted_work_area = work_area_offset.map_or_else(
             || work_area,
@@ -379,9 +660,8 @@ impl Workspace {
                 with_offset
             },
         );
-
         if (self.containers().len() <= window_based_work_area_offset_limit as usize
-            || self.monocle_container().is_some() && window_based_work_area_offset_limit > 0)
+            || self.monocle_container.is_some() && window_based_work_area_offset_limit > 0)
             && self.apply_window_based_work_area_offset
         {
             adjusted_work_area = window_based_work_area_offset.map_or_else(
@@ -402,21 +682,21 @@ impl Workspace {
 
         self.enforce_resize_constraints();
 
-        if !self.layout_rules().is_empty() {
+        if !self.layout_rules.is_empty() {
             let mut updated_layout = None;
 
-            for (threshold, layout) in self.layout_rules() {
+            for (threshold, layout) in &self.layout_rules {
                 if self.containers().len() >= *threshold {
                     updated_layout = Option::from(layout.clone());
                 }
             }
 
             if let Some(updated_layout) = updated_layout {
-                self.set_layout(updated_layout);
+                self.layout = updated_layout;
             }
         }
 
-        if let Some(window_container_behaviour_rules) = self.window_container_behaviour_rules() {
+        if let Some(window_container_behaviour_rules) = &self.window_container_behaviour_rules {
             let mut updated_behaviour = None;
             for (threshold, behaviour) in window_container_behaviour_rules {
                 if self.containers().len() >= *threshold {
@@ -424,97 +704,164 @@ impl Workspace {
                 }
             }
 
-            self.set_window_container_behaviour(updated_behaviour);
+            self.window_container_behaviour = updated_behaviour;
         }
 
-        let managed_maximized_window = self.maximized_window().is_some();
+        let managed_maximized_window = self.maximized_window.is_some();
 
-        if *self.tile() {
-            if let Some(container) = self.monocle_container_mut() {
+        if self.tile {
+            if let Some(container) = &mut self.monocle_container {
                 if let Some(window) = container.focused_window_mut() {
                     adjusted_work_area.add_padding(container_padding);
-                    {
-                        let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
-                        adjusted_work_area.add_padding(border_offset);
-                        let width = BORDER_WIDTH.load(Ordering::SeqCst);
-                        adjusted_work_area.add_padding(width);
-                    }
+                    adjusted_work_area.add_padding(border_offset);
+                    adjusted_work_area.add_padding(border_width);
                     window.set_position(&adjusted_work_area, true)?;
                 };
-            } else if let Some(window) = self.maximized_window_mut() {
+            } else if let Some(window) = &mut self.maximized_window {
                 window.maximize();
             } else if !self.containers().is_empty() {
-                let mut layouts = self.layout().as_boxed_arrangement().calculate(
-                    &adjusted_work_area,
-                    NonZeroUsize::new(self.containers().len()).ok_or_else(|| {
-                        anyhow!(
-                            "there must be at least one container to calculate a workspace layout"
-                        )
-                    })?,
-                    Some(container_padding),
-                    self.layout_flip(),
-                    self.resize_dimensions(),
-                );
-
-                let should_remove_titlebars = REMOVE_TITLEBARS.load(Ordering::SeqCst);
-                let no_titlebar = NO_TITLEBAR.lock().clone();
-                let regex_identifiers = REGEX_IDENTIFIERS.lock().clone();
-
-                let containers = self.containers_mut();
-
-                for (i, container) in containers.iter_mut().enumerate() {
-                    let window_count = container.windows().len();
-
-                    if let Some(layout) = layouts.get_mut(i) {
-                        {
-                            let border_offset = BORDER_OFFSET.load(Ordering::SeqCst);
-                            layout.add_padding(border_offset);
-
-                            let width = BORDER_WIDTH.load(Ordering::SeqCst);
-                            layout.add_padding(width);
-                        }
-
-                        if stackbar_manager::should_have_stackbar(window_count) {
-                            let tab_height = STACKBAR_TAB_HEIGHT.load(Ordering::SeqCst);
-                            let total_height = tab_height + container_padding;
-
-                            layout.top += total_height;
-                            layout.bottom -= total_height;
-                        }
-
-                        for window in container.windows() {
-                            if container
-                                .focused_window()
-                                .is_some_and(|w| w.hwnd == window.hwnd)
-                            {
-                                let should_remove_titlebar_for_window = should_act(
-                                    &window.title().unwrap_or_default(),
-                                    &window.exe().unwrap_or_default(),
-                                    &window.class().unwrap_or_default(),
-                                    &window.path().unwrap_or_default(),
-                                    &no_titlebar,
-                                    &regex_identifiers,
-                                )
-                                .is_some();
-
-                                if should_remove_titlebars && should_remove_titlebar_for_window {
-                                    window.remove_title_bar()?;
-                                } else if should_remove_titlebar_for_window {
-                                    window.add_title_bar()?;
-                                }
-
-                                // If a window has been unmaximized via toggle-maximize, this block
-                                // will make sure that it is unmaximized via restore_window
-                                if window.is_maximized() && !managed_maximized_window {
-                                    WindowsApi::restore_window(window.hwnd);
-                                }
-                            }
-                            window.set_position(layout, false)?;
-                        }
-                    }
+                // windows that were not what they were told to be since the last layout, which
+                // is something that animations only show once they are done
+                let around_window = container_padding + border_offset + border_width;
+                // neighbours of a window that is dragged are not yet the size they are being
+                // made while it is followed: that is not what their columns are to be
+                if self.is_scrolling()
+                    && crate::scrolling::animations_enabled()
+                    && !crate::live_resize::is_stepping()
+                {
+                    self.adopt_actual_widths(around_window, adjusted_work_area.right);
                 }
 
-                self.set_latest_layout(layouts);
+                let mut pass = 0;
+                loop {
+                    let effective_layout_options = self.effective_layout_options();
+
+                    tracing::debug!(
+                        "Workspace '{}' update() - effective_layout_options: {:?} (base: {:?}, rules: {})",
+                        self.name.as_deref().unwrap_or("unnamed"),
+                        effective_layout_options,
+                        self.layout_options,
+                        self.layout_options_rules.len(),
+                    );
+                    let mut hidden = vec![];
+                    let mut layouts = if self.is_scrolling() {
+                        let others = crate::scrolling::other_monitors(
+                            &self.globals.work_area,
+                            &WindowsApi::monitor_rects(),
+                        );
+
+                        self.layout_scrolling(&adjusted_work_area, container_padding)
+                            .into_iter()
+                            .map(|placement| {
+                                let (rect, hide) = crate::scrolling::rest(
+                                    placement.rect,
+                                    placement.visibility,
+                                    &adjusted_work_area,
+                                    &others,
+                                );
+                                hidden.push(hide);
+                                rect
+                            })
+                            .collect()
+                    } else {
+                        self.layout.as_boxed_arrangement().calculate(
+                            &adjusted_work_area,
+                            NonZeroUsize::new(self.containers().len()).ok_or_eyre(
+                                "there must be at least one container to calculate a workspace layout",
+                            )?,
+                            Some(container_padding),
+                            self.layout_flip,
+                            &self.resize_dimensions,
+                            self.focused_container_idx(),
+                            effective_layout_options,
+                            &self.latest_layout,
+                        )
+                    };
+
+                    let should_remove_titlebars = REMOVE_TITLEBARS.load(Ordering::SeqCst);
+                    let no_titlebar = NO_TITLEBAR.lock().clone();
+                    let regex_identifiers = REGEX_IDENTIFIERS.lock().clone();
+
+                    let containers = self.containers_mut();
+
+                    for (i, container) in containers.iter_mut().enumerate() {
+                        let window_count = container.windows().len();
+
+                        if let Some(layout) = layouts.get_mut(i) {
+                            layout.add_padding(border_offset);
+                            layout.add_padding(border_width);
+
+                            if stackbar_manager::should_have_stackbar(window_count) {
+                                let tab_height = STACKBAR_TAB_HEIGHT.load(Ordering::SeqCst);
+                                let total_height = tab_height + container_padding;
+
+                                layout.top += total_height;
+                                layout.bottom -= total_height;
+                            }
+
+                            for window in container.windows() {
+                                if container
+                                    .focused_window()
+                                    .is_some_and(|w| w.hwnd == window.hwnd)
+                                {
+                                    let should_remove_titlebar_for_window = should_act(
+                                        &window.title().unwrap_or_default(),
+                                        &window.exe().unwrap_or_default(),
+                                        &window.class().unwrap_or_default(),
+                                        &window.path().unwrap_or_default(),
+                                        &no_titlebar,
+                                        &regex_identifiers,
+                                    )
+                                    .is_some();
+
+                                    if should_remove_titlebars && should_remove_titlebar_for_window
+                                    {
+                                        window.remove_title_bar()?;
+                                    } else if should_remove_titlebar_for_window {
+                                        window.add_title_bar()?;
+                                    }
+
+                                    // If a window has been unmaximized via toggle-maximize, this block
+                                    // will make sure that it is unmaximized via restore_window
+                                    if window.is_maximized() && !managed_maximized_window {
+                                        WindowsApi::restore_window(window.hwnd);
+                                    }
+                                }
+                                if hidden.get(i).copied().unwrap_or_default() {
+                                    // it is seen on another monitor wherever it rests here
+                                    window.hide();
+                                } else {
+                                    if crate::scrolling::should_restore_when_placed(
+                                        window.hwnd,
+                                        container.focused_window().map(|w| w.hwnd),
+                                        &HIDDEN_HWNDS.lock(),
+                                    ) {
+                                        window.restore();
+                                    }
+
+                                    window.set_position(layout, false)?;
+                                }
+                            }
+                        }
+                    }
+
+                    self.latest_layout = layouts;
+
+                    // with animations off every window that changed width has been asked what it
+                    // is by now, so a window that refused is known, and everything after it is
+                    // placed again with room for it. Once is enough: a layout is never made to
+                    // chase the sizes that are read back this time round.
+                    if pass == 0
+                        && self.is_scrolling()
+                        && !crate::scrolling::animations_enabled()
+                        && self.adopt_actual_widths(around_window, adjusted_work_area.right)
+                    {
+                        pass += 1;
+                        continue;
+                    }
+
+                    break;
+                }
             }
         }
 
@@ -529,108 +876,33 @@ impl Workspace {
         // without this check, if there are exactly two containers, when one is toggled to monocle
         // the resize dimensions will be truncated to len == 1, and when it is reintegrated, if it
         // had a resize adjustment before, that will have been lost
-        if self.monocle_container().is_none() {
-            self.resize_dimensions_mut().resize(container_count, None);
+        if self.monocle_container.is_none() {
+            self.resize_dimensions.resize(container_count, None);
         }
 
         Ok(())
-    }
-
-    pub fn reap_orphans(&mut self) -> Result<(usize, usize)> {
-        let mut hwnds = vec![];
-        let mut floating_hwnds = vec![];
-        let mut remove_monocle = false;
-        let mut remove_maximized = false;
-
-        if let Some(monocle) = &self.monocle_container {
-            let window_count = monocle.windows().len();
-            let mut orphan_count = 0;
-            for window in monocle.windows() {
-                if !window.is_window() {
-                    hwnds.push(window.hwnd);
-                    orphan_count += 1;
-                }
-            }
-
-            remove_monocle = orphan_count == window_count;
-        }
-
-        if let Some(window) = &self.maximized_window {
-            if !window.is_window() {
-                hwnds.push(window.hwnd);
-                remove_maximized = true;
-            }
-        }
-
-        for window in self.visible_windows().into_iter().flatten() {
-            if !window.is_window()
-                // This one is a hack because WINWORD.EXE is an absolute trainwreck of an app
-                // when multiple docs are open, it keeps open an invisible window, with WS_EX_LAYERED
-                // (A STYLE THAT THE REGULAR WINDOWS NEED IN ORDER TO BE MANAGED!) when one of the
-                // docs is closed
-                //
-                // I hate every single person who worked on Microsoft Office 365, especially Word
-                || !window.is_visible()
-            {
-                hwnds.push(window.hwnd);
-            }
-        }
-
-        for window in self.floating_windows() {
-            if !window.is_window() {
-                floating_hwnds.push(window.hwnd);
-            }
-        }
-
-        for hwnd in &hwnds {
-            tracing::debug!("reaping hwnd: {}", hwnd);
-            self.remove_window(*hwnd)?;
-        }
-
-        for hwnd in &floating_hwnds {
-            tracing::debug!("reaping floating hwnd: {}", hwnd);
-            self.floating_windows_mut()
-                .retain(|w| !floating_hwnds.contains(&w.hwnd));
-        }
-
-        let mut container_ids = vec![];
-        for container in self.containers() {
-            if container.windows().is_empty() {
-                container_ids.push(container.id().clone());
-            }
-        }
-
-        self.containers_mut()
-            .retain(|c| !container_ids.contains(c.id()));
-
-        if remove_monocle {
-            self.set_monocle_container(None);
-        }
-
-        if remove_maximized {
-            self.set_maximized_window(None);
-        }
-
-        Ok((hwnds.len() + floating_hwnds.len(), container_ids.len()))
     }
 
     pub fn container_for_window(&self, hwnd: isize) -> Option<&Container> {
         self.containers().get(self.container_idx_for_window(hwnd)?)
     }
 
-    pub fn focus_container_by_window(&mut self, hwnd: isize) -> Result<()> {
+    /// If there is a container which holds the window with `hwnd` it will focus that container.
+    /// This function will only emit a focus on the window if it isn't the focused window of that
+    /// container already.
+    pub fn focus_container_by_window(&mut self, hwnd: isize) -> eyre::Result<()> {
         let container_idx = self
             .container_idx_for_window(hwnd)
-            .ok_or_else(|| anyhow!("there is no container/window"))?;
+            .ok_or_eyre("there is no container/window")?;
 
         let container = self
             .containers_mut()
             .get_mut(container_idx)
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         let window_idx = container
             .idx_for_window(hwnd)
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         let mut should_load = false;
 
@@ -655,10 +927,10 @@ impl Workspace {
         let point = WindowsApi::cursor_pos().ok()?;
 
         for (i, _container) in self.containers().iter().enumerate() {
-            if let Some(rect) = self.latest_layout().get(i) {
-                if rect.contains_point((point.x, point.y)) {
-                    idx = Option::from(i);
-                }
+            if let Some(rect) = self.latest_layout.get(i)
+                && rect.contains_point((point.x, point.y))
+            {
+                idx = Option::from(i);
             }
         }
 
@@ -672,25 +944,24 @@ impl Workspace {
             }
         }
 
-        if let Some(window) = self.maximized_window() {
-            if let Ok(window_exe) = window.exe() {
-                if exe == window_exe {
-                    return Option::from(window.hwnd);
-                }
-            }
+        if let Some(window) = self.maximized_window
+            && let Ok(window_exe) = window.exe()
+            && exe == window_exe
+        {
+            return Option::from(window.hwnd);
         }
 
-        if let Some(container) = self.monocle_container() {
-            if let Some(hwnd) = container.hwnd_from_exe(exe) {
-                return Option::from(hwnd);
-            }
+        if let Some(container) = &self.monocle_container
+            && let Some(hwnd) = container.hwnd_from_exe(exe)
+        {
+            return Option::from(hwnd);
         }
 
         for window in self.floating_windows() {
-            if let Ok(window_exe) = window.exe() {
-                if exe == window_exe {
-                    return Option::from(window.hwnd);
-                }
+            if let Ok(window_exe) = window.exe()
+                && exe == window_exe
+            {
+                return Option::from(window.hwnd);
             }
         }
 
@@ -707,25 +978,24 @@ impl Workspace {
             }
         }
 
-        if let Some(window) = self.maximized_window() {
-            if let Ok(window_exe) = window.exe() {
-                if exe == window_exe {
-                    return Some(WorkspaceWindowLocation::Maximized);
-                }
-            }
+        if let Some(window) = self.maximized_window
+            && let Ok(window_exe) = window.exe()
+            && exe == window_exe
+        {
+            return Some(WorkspaceWindowLocation::Maximized);
         }
 
-        if let Some(container) = self.monocle_container() {
-            if let Some(window_idx) = container.idx_from_exe(exe) {
-                return Some(WorkspaceWindowLocation::Monocle(window_idx));
-            }
+        if let Some(container) = &self.monocle_container
+            && let Some(window_idx) = container.idx_from_exe(exe)
+        {
+            return Some(WorkspaceWindowLocation::Monocle(window_idx));
         }
 
         for (window_idx, window) in self.floating_windows().iter().enumerate() {
-            if let Ok(window_exe) = window.exe() {
-                if exe == window_exe {
-                    return Some(WorkspaceWindowLocation::Floating(window_idx));
-                }
+            if let Ok(window_exe) = window.exe()
+                && exe == window_exe
+            {
+                return Some(WorkspaceWindowLocation::Floating(window_idx));
             }
         }
 
@@ -739,33 +1009,33 @@ impl Workspace {
             }
         }
 
-        if let Some(window) = self.maximized_window() {
-            if hwnd == window.hwnd {
-                return true;
-            }
+        if let Some(window) = self.maximized_window
+            && hwnd == window.hwnd
+        {
+            return true;
         }
 
-        if let Some(container) = self.monocle_container() {
-            if container.contains_window(hwnd) {
-                return true;
-            }
+        if let Some(container) = &self.monocle_container
+            && container.contains_window(hwnd)
+        {
+            return true;
         }
 
         false
     }
 
-    pub fn is_focused_window_monocle_or_maximized(&self) -> Result<bool> {
+    pub fn is_focused_window_monocle_or_maximized(&self) -> eyre::Result<bool> {
         let hwnd = WindowsApi::foreground_window()?;
-        if let Some(window) = self.maximized_window() {
-            if hwnd == window.hwnd {
-                return Ok(true);
-            }
+        if let Some(window) = self.maximized_window
+            && hwnd == window.hwnd
+        {
+            return Ok(true);
         }
 
-        if let Some(container) = self.monocle_container() {
-            if container.contains_window(hwnd) {
-                return Ok(true);
-            }
+        if let Some(container) = &self.monocle_container
+            && container.contains_window(hwnd)
+        {
+            return Ok(true);
         }
 
         Ok(false)
@@ -773,8 +1043,8 @@ impl Workspace {
 
     pub fn is_empty(&self) -> bool {
         self.containers().is_empty()
-            && self.maximized_window().is_none()
-            && self.monocle_container().is_none()
+            && self.maximized_window.is_none()
+            && self.monocle_container.is_none()
             && self.floating_windows().is_empty()
     }
 
@@ -785,16 +1055,16 @@ impl Workspace {
             }
         }
 
-        if let Some(window) = self.maximized_window() {
-            if hwnd == window.hwnd {
-                return true;
-            }
+        if let Some(window) = self.maximized_window
+            && hwnd == window.hwnd
+        {
+            return true;
         }
 
-        if let Some(container) = self.monocle_container() {
-            if container.contains_window(hwnd) {
-                return true;
-            }
+        if let Some(container) = &self.monocle_container
+            && container.contains_window(hwnd)
+        {
+            return true;
         }
 
         for window in self.floating_windows() {
@@ -806,25 +1076,26 @@ impl Workspace {
         false
     }
 
-    pub fn promote_container(&mut self) -> Result<()> {
-        let resize = self.resize_dimensions_mut().remove(0);
+    pub fn promote_container(&mut self) -> eyre::Result<()> {
+        let focused_idx = self.focused_container_idx();
         let container = self
-            .remove_focused_container()
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .containers_mut()
+            .remove_respecting_locks(focused_idx)
+            .ok_or_eyre("there is no container")?;
 
-        let primary_idx = match self.layout() {
+        let primary_idx = match &self.layout {
             Layout::Default(_) => 0,
             Layout::Custom(layout) => layout.first_container_idx(
                 layout
                     .primary_idx()
-                    .ok_or_else(|| anyhow!("this custom layout does not have a primary column"))?,
+                    .ok_or_eyre("this custom layout does not have a primary column")?,
             ),
         };
 
-        self.containers_mut().insert(primary_idx, container);
-        self.resize_dimensions_mut().insert(primary_idx, resize);
-
-        self.focus_container(primary_idx);
+        let insertion_idx = self
+            .containers_mut()
+            .insert_respecting_locks(primary_idx, container);
+        self.focus_container(insertion_idx);
 
         Ok(())
     }
@@ -839,24 +1110,40 @@ impl Workspace {
         self.focus_first_container();
     }
 
-    pub fn insert_container_at_idx(&mut self, idx: usize, container: Container) {
-        self.containers_mut().insert(idx, container);
-        self.focus_container(idx);
+    // this fn respects locked container indexes - we should use it for pretty much everything
+    // except monocle and maximize toggles
+    pub fn insert_container_at_idx(&mut self, idx: usize, container: Container) -> usize {
+        let insertion_idx = self
+            .containers_mut()
+            .insert_respecting_locks(idx, container);
+
+        if insertion_idx > self.resize_dimensions.len() {
+            self.resize_dimensions.push(None);
+        } else {
+            self.resize_dimensions.insert(insertion_idx, None);
+        }
+
+        self.focus_container(insertion_idx);
+
+        insertion_idx
     }
 
+    // this fn respects locked container indexes - we should use it for pretty much everything
+    // except monocle and maximize toggles
     pub fn remove_container_by_idx(&mut self, idx: usize) -> Option<Container> {
-        if idx < self.resize_dimensions().len() {
-            self.resize_dimensions_mut().remove(idx);
+        // wherever it goes next, it goes as wide as it was
+        self.note_scrolling_departure(idx);
+
+        let container = self.containers_mut().remove_respecting_locks(idx);
+
+        if idx < self.resize_dimensions.len() {
+            self.resize_dimensions.remove(idx);
         }
 
-        if idx < self.containers().len() {
-            return self.containers_mut().remove(idx);
-        }
-
-        None
+        container
     }
 
-    fn container_idx_for_window(&self, hwnd: isize) -> Option<usize> {
+    pub fn container_idx_for_window(&self, hwnd: isize) -> Option<usize> {
         let mut idx = None;
         for (i, x) in self.containers().iter().enumerate() {
             if x.contains_window(hwnd) {
@@ -867,7 +1154,7 @@ impl Workspace {
         idx
     }
 
-    pub fn remove_window(&mut self, hwnd: isize) -> Result<()> {
+    pub fn remove_window(&mut self, hwnd: isize) -> eyre::Result<()> {
         border_manager::delete_border(hwnd);
 
         if self.floating_windows().iter().any(|w| w.hwnd == hwnd) {
@@ -875,68 +1162,63 @@ impl Workspace {
             return Ok(());
         }
 
-        if let Some(container) = self.monocle_container_mut() {
-            if let Some(window_idx) = container
+        if let Some(container) = &mut self.monocle_container
+            && let Some(window_idx) = container
                 .windows()
                 .iter()
                 .position(|window| window.hwnd == hwnd)
-            {
-                container
-                    .remove_window_by_idx(window_idx)
-                    .ok_or_else(|| anyhow!("there is no window"))?;
+        {
+            container
+                .remove_window_by_idx(window_idx)
+                .ok_or_eyre("there is no window")?;
 
-                if container.windows().is_empty() {
-                    self.set_monocle_container(None);
-                    self.set_monocle_container_restore_idx(None);
-                }
-
-                for c in self.containers() {
-                    c.restore();
-                }
-
-                return Ok(());
+            if container.windows().is_empty() {
+                self.monocle_container = None;
+                self.monocle_container_restore_idx = None;
             }
+
+            for c in self.containers() {
+                c.restore();
+            }
+
+            return Ok(());
         }
 
-        if let Some(window) = self.maximized_window() {
-            if window.hwnd == hwnd {
-                window.unmaximize();
-                self.set_maximized_window(None);
-                self.set_maximized_window_restore_idx(None);
-                return Ok(());
-            }
+        if let Some(window) = self.maximized_window
+            && window.hwnd == hwnd
+        {
+            window.unmaximize();
+            self.maximized_window = None;
+            self.maximized_window_restore_idx = None;
+            return Ok(());
         }
 
         let container_idx = self
             .container_idx_for_window(hwnd)
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         let container = self
             .containers_mut()
             .get_mut(container_idx)
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         let window_idx = container
             .windows()
             .iter()
             .position(|window| window.hwnd == hwnd)
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         container
             .remove_window_by_idx(window_idx)
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         if container.windows().is_empty() {
-            self.containers_mut()
-                .remove(container_idx)
-                .ok_or_else(|| anyhow!("there is no container"))?;
+            let container_id = container.id.clone();
+            self.remove_container_by_idx(container_idx);
 
-            // Whenever a container is empty, we need to remove any resize dimensions for it too
-            if self.resize_dimensions().get(container_idx).is_some() {
-                self.resize_dimensions_mut().remove(container_idx);
+            if !self.focus_after_scrolling_removal(&container_id) {
+                self.focus_previous_container();
             }
-
-            self.focus_previous_container();
         } else {
             container.load_focused_window();
             if let Some(window) = container.focused_window() {
@@ -962,16 +1244,36 @@ impl Workspace {
         container
     }
 
+    pub fn preselect_container_idx(&mut self, insertion_idx: usize) {
+        self.preselected_container_idx = Some(insertion_idx);
+        self.insert_container_at_idx(insertion_idx, Container::preselect());
+    }
+
+    pub fn cancel_preselect(&mut self) {
+        if let Some(idx) = self.preselected_container_idx {
+            self.containers_mut().remove_respecting_locks(idx);
+            self.preselected_container_idx = None;
+        }
+    }
+
     pub fn new_idx_for_direction(&self, direction: OperationDirection) -> Option<usize> {
+        // in a strip, left and right are the neighbouring columns and up and down are the tiles of
+        // the column, which the strip is the one to say
+        if self.is_scrolling() && self.scrolling.is_some() {
+            return self.scrolling_idx_for_direction(direction);
+        }
+
         let len = NonZeroUsize::new(self.containers().len())?;
 
         direction.destination(
-            self.layout().as_boxed_direction().as_ref(),
-            self.layout_flip(),
+            self.layout.as_boxed_direction().as_ref(),
+            self.layout_flip,
             self.focused_container_idx(),
             len,
+            self.layout_options,
         )
     }
+
     pub fn new_idx_for_cycle_direction(&self, direction: CycleDirection) -> Option<usize> {
         Option::from(direction.next_idx(
             self.focused_container_idx(),
@@ -979,21 +1281,21 @@ impl Workspace {
         ))
     }
 
-    pub fn move_window_to_container(&mut self, target_container_idx: usize) -> Result<()> {
+    // this is what we use for stacking
+    pub fn move_window_to_container(&mut self, target_container_idx: usize) -> eyre::Result<()> {
         let focused_idx = self.focused_container_idx();
 
         let container = self
             .focused_container_mut()
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         let window = container
             .remove_focused_window()
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         // This is a little messy
         let adjusted_target_container_index = if container.windows().is_empty() {
-            self.containers_mut().remove(focused_idx);
-            self.resize_dimensions_mut().remove(focused_idx);
+            self.remove_container_by_idx(focused_idx);
 
             if focused_idx < target_container_idx {
                 target_container_idx.saturating_sub(1)
@@ -1008,32 +1310,31 @@ impl Workspace {
         let target_container = self
             .containers_mut()
             .get_mut(adjusted_target_container_index)
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         target_container.add_window(window);
 
         self.focus_container(adjusted_target_container_index);
         self.focused_container_mut()
-            .ok_or_else(|| anyhow!("there is no container"))?
+            .ok_or_eyre("there is no container")?
             .load_focused_window();
 
         Ok(())
     }
 
-    pub fn new_container_for_focused_window(&mut self) -> Result<()> {
+    pub fn new_container_for_focused_window(&mut self) -> eyre::Result<()> {
         let focused_container_idx = self.focused_container_idx();
 
         let container = self
             .focused_container_mut()
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         let window = container
             .remove_focused_window()
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         if container.windows().is_empty() {
-            self.containers_mut().remove(focused_container_idx);
-            self.resize_dimensions_mut().remove(focused_container_idx);
+            self.remove_container_by_idx(focused_container_idx);
         } else {
             container.load_focused_window();
         }
@@ -1045,59 +1346,166 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn new_container_for_floating_window(&mut self) -> Result<()> {
+    pub fn new_container_for_floating_window(&mut self) -> eyre::Result<()> {
         let focused_idx = self.focused_container_idx();
         let window = self
             .remove_focused_floating_window()
-            .ok_or_else(|| anyhow!("there is no floating window"))?;
+            .ok_or_eyre("there is no floating window")?;
 
         let mut container = Container::default();
         container.add_window(window);
-        self.containers_mut().insert(focused_idx, container);
-        self.resize_dimensions_mut().insert(focused_idx, None);
+
+        self.insert_container_at_idx(focused_idx, container);
 
         Ok(())
     }
 
     pub fn new_container_for_window(&mut self, window: Window) {
-        let next_idx = if self.containers().is_empty() {
+        let next_idx = if let Some(idx) = self.preselected_container_idx {
+            let next = idx;
+            self.preselected_container_idx = None;
+            self.remove_container_by_idx(next);
+            next
+        } else if self.containers().is_empty() {
             0
+        } else if let Some(idx) = self.scrolling_insertion_idx() {
+            idx
         } else {
-            self.focused_container_idx() + 1
+            self.resolve_placement_index(&window)
         };
 
         let mut container = Container::default();
         container.add_window(window);
 
-        if next_idx > self.containers().len() {
-            self.containers_mut().push_back(container);
-        } else {
-            self.containers_mut().insert(next_idx, container);
-        }
-
-        if next_idx > self.resize_dimensions().len() {
-            self.resize_dimensions_mut().push(None);
-        } else {
-            self.resize_dimensions_mut().insert(next_idx, None);
-        }
-
-        self.focus_container(next_idx);
+        self.insert_container_at_idx(next_idx, container);
     }
 
-    pub fn new_floating_window(&mut self) -> Result<()> {
-        let window = if let Some(maximized_window) = self.maximized_window() {
-            let window = *maximized_window;
-            self.set_maximized_window(None);
-            self.set_maximized_window_restore_idx(None);
+    /// Resolves the container index at which a new window should be placed,
+    /// based on the `initial_window_placement_rules` configuration.
+    ///
+    /// Falls back to the default placement (currently `AfterFocused`,
+    /// i.e. `focused_container_idx() + 1`) when:
+    /// - No rules are configured
+    /// - A `Rules` map has no matching rule for the window
+    /// - A resolved index is out of bounds
+    fn resolve_placement_index(&self, window: &Window) -> usize {
+        let fallback_idx = self.focused_container_idx() + 1;
+
+        let Some(rules) = &self.initial_window_placement_rules else {
+            return fallback_idx;
+        };
+
+        match rules {
+            InitialWindowPlacementRules::Target(target) => {
+                self.resolve_placement_target(target, fallback_idx)
+            }
+            InitialWindowPlacementRules::Rules(rules_map) => {
+                let Ok(title) = window.title() else {
+                    return fallback_idx;
+                };
+                let Ok(exe_name) = window.exe() else {
+                    return fallback_idx;
+                };
+                let Ok(class) = window.class() else {
+                    return fallback_idx;
+                };
+                let Ok(path) = window.path() else {
+                    return fallback_idx;
+                };
+
+                let regex_identifiers = REGEX_IDENTIFIERS.lock().clone();
+
+                // BTreeMap iterates in key order
+                for (target, placement_rules) in rules_map {
+                    let matched = match placement_rules {
+                        PlacementMatchingRules::Single(id) => should_act_individual(
+                            &title,
+                            &exe_name,
+                            &class,
+                            &path,
+                            id,
+                            &regex_identifiers,
+                        ),
+                        PlacementMatchingRules::Many(rules) => {
+                            // OR logic: any matching rule triggers placement at this target.
+                            // Each MatchingRule handles its own Simple/Composite (AND) logic
+                            // internally via should_act.
+                            should_act(&title, &exe_name, &class, &path, rules, &regex_identifiers)
+                                .is_some()
+                        }
+                    };
+
+                    if matched {
+                        return self.resolve_placement_target(target, fallback_idx);
+                    }
+                }
+
+                // No matching rule found
+                fallback_idx
+            }
+        }
+    }
+
+    /// Resolves a `WindowPlacement` variant to a concrete container index.
+    fn resolve_window_placement(&self, placement: &WindowPlacement, fallback_idx: usize) -> usize {
+        match placement {
+            WindowPlacement::AfterFocused => self.focused_container_idx() + 1,
+            WindowPlacement::BeforeFocused => self.focused_container_idx(),
+            WindowPlacement::Primary => {
+                let idx = self.layout.primary_index();
+                if idx <= self.containers().len() {
+                    idx
+                } else {
+                    fallback_idx
+                }
+            }
+            WindowPlacement::Secondary => {
+                if let Some(idx) = self.layout.secondary_index(self.containers().len()) {
+                    if idx <= self.containers().len() {
+                        idx
+                    } else {
+                        fallback_idx
+                    }
+                } else {
+                    fallback_idx
+                }
+            }
+            WindowPlacement::Last => self.containers().len(),
+        }
+    }
+
+    /// Resolves a `PlacementTarget` (either a named placement or a 1-based index) to a concrete container index.
+    fn resolve_placement_target(&self, target: &PlacementTarget, fallback_idx: usize) -> usize {
+        match target {
+            PlacementTarget::Placement(placement) => {
+                self.resolve_window_placement(placement, fallback_idx)
+            }
+            PlacementTarget::Index(idx) => {
+                // Config indices are 1-based; convert to 0-based
+                let zero_based = idx.saturating_sub(1);
+                if zero_based <= self.containers().len() {
+                    zero_based
+                } else {
+                    fallback_idx
+                }
+            }
+        }
+    }
+
+    pub fn new_floating_window(&mut self) -> eyre::Result<()> {
+        let window = if let Some(maximized_window) = self.maximized_window {
+            let window = maximized_window;
+            self.maximized_window = None;
+            self.maximized_window_restore_idx = None;
             window
-        } else if let Some(monocle_container) = self.monocle_container_mut() {
+        } else if let Some(monocle_container) = &mut self.monocle_container {
             let window = monocle_container
                 .remove_focused_window()
-                .ok_or_else(|| anyhow!("there is no window"))?;
+                .ok_or_eyre("there is no window")?;
 
             if monocle_container.windows().is_empty() {
-                self.set_monocle_container(None);
-                self.set_monocle_container_restore_idx(None);
+                self.monocle_container = None;
+                self.monocle_container_restore_idx = None;
             } else {
                 monocle_container.load_focused_window();
             }
@@ -1108,15 +1516,14 @@ impl Workspace {
 
             let container = self
                 .focused_container_mut()
-                .ok_or_else(|| anyhow!("there is no container"))?;
+                .ok_or_eyre("there is no container")?;
 
             let window = container
                 .remove_focused_window()
-                .ok_or_else(|| anyhow!("there is no window"))?;
+                .ok_or_eyre("there is no window")?;
 
             if container.windows().is_empty() {
-                self.containers_mut().remove(focused_idx);
-                self.resize_dimensions_mut().remove(focused_idx);
+                self.remove_container_by_idx(focused_idx);
 
                 if focused_idx == self.containers().len() {
                     self.focus_container(focused_idx.saturating_sub(1));
@@ -1128,7 +1535,7 @@ impl Workspace {
             window
         };
 
-        self.floating_windows_mut().push(window);
+        self.floating_windows_mut().push_back(window);
 
         Ok(())
     }
@@ -1155,7 +1562,7 @@ impl Workspace {
     }
 
     fn enforce_resize_constraints_for_bsp(&mut self) {
-        for (i, rect) in self.resize_dimensions_mut().iter_mut().enumerate() {
+        for (i, rect) in self.resize_dimensions.iter_mut().enumerate() {
             if let Some(rect) = rect {
                 // Even containers can't be resized to the bottom
                 if i % 2 == 0 {
@@ -1168,20 +1575,20 @@ impl Workspace {
         }
 
         // The first container can never be resized to the left or the top
-        if let Some(Some(first)) = self.resize_dimensions_mut().first_mut() {
+        if let Some(Some(first)) = self.resize_dimensions.first_mut() {
             first.top = 0;
             first.left = 0;
         }
 
         // The last container can never be resized to the bottom or the right
-        if let Some(Some(last)) = self.resize_dimensions_mut().last_mut() {
+        if let Some(Some(last)) = self.resize_dimensions.last_mut() {
             last.bottom = 0;
             last.right = 0;
         }
     }
 
     fn enforce_resize_for_columns(&mut self) {
-        let resize_dimensions = self.resize_dimensions_mut();
+        let resize_dimensions = &mut self.resize_dimensions;
         match resize_dimensions.len() {
             0 | 1 => self.enforce_no_resize(),
             _ => {
@@ -1204,7 +1611,7 @@ impl Workspace {
     }
 
     fn enforce_resize_for_rows(&mut self) {
-        let resize_dimensions = self.resize_dimensions_mut();
+        let resize_dimensions = &mut self.resize_dimensions;
         match resize_dimensions.len() {
             0 | 1 => self.enforce_no_resize(),
             _ => {
@@ -1227,13 +1634,13 @@ impl Workspace {
     }
 
     fn enforce_resize_for_vertical_stack(&mut self) {
-        let resize_dimensions = self.resize_dimensions_mut();
+        let resize_dimensions = &mut self.resize_dimensions;
         match resize_dimensions.len() {
             // Single window can not be resized at all
             0 | 1 => self.enforce_no_resize(),
             _ => {
                 // Zero is actually on the left
-                if let Some(mut left) = resize_dimensions[0] {
+                if let Some(left) = resize_dimensions[0].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.left = 0;
@@ -1260,13 +1667,13 @@ impl Workspace {
     }
 
     fn enforce_resize_for_right_vertical_stack(&mut self) {
-        let resize_dimensions = self.resize_dimensions_mut();
+        let resize_dimensions = &mut self.resize_dimensions;
         match resize_dimensions.len() {
             // Single window can not be resized at all
             0 | 1 => self.enforce_no_resize(),
             _ => {
                 // Zero is actually on the right
-                if let Some(mut left) = resize_dimensions[1] {
+                if let Some(left) = resize_dimensions[1].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.right = 0;
@@ -1293,11 +1700,11 @@ impl Workspace {
     }
 
     fn enforce_resize_for_horizontal_stack(&mut self) {
-        let resize_dimensions = self.resize_dimensions_mut();
+        let resize_dimensions = &mut self.resize_dimensions;
         match resize_dimensions.len() {
             0 | 1 => self.enforce_no_resize(),
             _ => {
-                if let Some(mut left) = resize_dimensions[0] {
+                if let Some(left) = resize_dimensions[0].as_mut() {
                     left.top = 0;
                     left.left = 0;
                     left.right = 0;
@@ -1321,21 +1728,21 @@ impl Workspace {
     }
 
     fn enforce_resize_for_ultrawide(&mut self) {
-        let resize_dimensions = self.resize_dimensions_mut();
+        let resize_dimensions = &mut self.resize_dimensions;
         match resize_dimensions.len() {
             // Single window can not be resized at all
             0 | 1 => self.enforce_no_resize(),
             // Two windows can only be resized in the middle
             2 => {
                 // Zero is actually on the right
-                if let Some(mut right) = resize_dimensions[0] {
+                if let Some(right) = resize_dimensions[0].as_mut() {
                     right.top = 0;
                     right.bottom = 0;
                     right.right = 0;
                 }
 
                 // One is on the left
-                if let Some(mut left) = resize_dimensions[1] {
+                if let Some(left) = resize_dimensions[1].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.left = 0;
@@ -1345,13 +1752,13 @@ impl Workspace {
             // stack on the right
             _ => {
                 // Central can be resized left or right
-                if let Some(mut right) = resize_dimensions[0] {
+                if let Some(right) = resize_dimensions[0].as_mut() {
                     right.top = 0;
                     right.bottom = 0;
                 }
 
                 // Left one can only be resized to the right
-                if let Some(mut left) = resize_dimensions[1] {
+                if let Some(left) = resize_dimensions[1].as_mut() {
                     left.top = 0;
                     left.bottom = 0;
                     left.left = 0;
@@ -1378,7 +1785,7 @@ impl Workspace {
     }
 
     fn enforce_no_resize(&mut self) {
-        for rect in self.resize_dimensions_mut().iter_mut().flatten() {
+        for rect in self.resize_dimensions.iter_mut().flatten() {
             rect.left = 0;
             rect.right = 0;
             rect.top = 0;
@@ -1386,38 +1793,42 @@ impl Workspace {
         }
     }
 
-    pub fn new_monocle_container(&mut self) -> Result<()> {
+    pub fn new_monocle_container(&mut self) -> eyre::Result<()> {
         let focused_idx = self.focused_container_idx();
+
+        // we shouldn't use remove_container_by_idx here because it doesn't make sense for
+        // monocle and maximized toggles which take over the whole screen before being reinserted
+        // at the same index to respect locked container indexes
         let container = self
             .containers_mut()
             .remove(focused_idx)
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         // We don't remove any resize adjustments for a monocle, because when this container is
         // inevitably reintegrated, it would be weird if it doesn't go back to the dimensions
         // it had before
 
-        self.set_monocle_container(Option::from(container));
-        self.set_monocle_container_restore_idx(Option::from(focused_idx));
+        self.monocle_container = Option::from(container);
+        self.monocle_container_restore_idx = Option::from(focused_idx);
         self.focus_previous_container();
 
-        self.monocle_container_mut()
+        self.monocle_container
             .as_mut()
-            .ok_or_else(|| anyhow!("there is no monocle container"))?
+            .ok_or_eyre("there is no monocle container")?
             .load_focused_window();
 
         Ok(())
     }
 
-    pub fn reintegrate_monocle_container(&mut self) -> Result<()> {
+    pub fn reintegrate_monocle_container(&mut self) -> eyre::Result<()> {
         let restore_idx = self
-            .monocle_container_restore_idx()
-            .ok_or_else(|| anyhow!("there is no monocle restore index"))?;
+            .monocle_container_restore_idx
+            .ok_or_eyre("there is no monocle restore index")?;
 
         let container = self
-            .monocle_container_mut()
+            .monocle_container
             .as_ref()
-            .ok_or_else(|| anyhow!("there is no monocle container"))?;
+            .ok_or_eyre("there is no monocle container")?;
 
         let container = container.clone();
         if restore_idx >= self.containers().len() {
@@ -1425,62 +1836,69 @@ impl Workspace {
                 .resize(restore_idx, Container::default());
         }
 
+        // we shouldn't use insert_container_at_index here because it doesn't make sense for
+        // monocle and maximized toggles which take over the whole screen before being reinserted
+        // at the same index to respect locked container indexes
         self.containers_mut().insert(restore_idx, container);
         self.focus_container(restore_idx);
         self.focused_container_mut()
-            .ok_or_else(|| anyhow!("there is no container"))?
+            .ok_or_eyre("there is no container")?
             .load_focused_window();
 
-        self.set_monocle_container(None);
-        self.set_monocle_container_restore_idx(None);
+        self.monocle_container = None;
+        self.monocle_container_restore_idx = None;
 
         Ok(())
     }
 
-    pub fn new_maximized_window(&mut self) -> Result<()> {
-        let focused_idx = self.focused_container_idx();
-        let foreground_hwnd = WindowsApi::foreground_window()?;
-        let mut floating_window = None;
-
-        if !self.floating_windows().is_empty() {
-            let mut focused_floating_window_idx = None;
-            for (i, w) in self.floating_windows().iter().enumerate() {
-                if w.hwnd == foreground_hwnd {
-                    focused_floating_window_idx = Option::from(i);
-                }
-            }
-
-            if let Some(idx) = focused_floating_window_idx {
-                floating_window = Option::from(self.floating_windows_mut().remove(idx));
-            }
+    pub fn cycle_monocle_container(&mut self, direction: CycleDirection) -> eyre::Result<()> {
+        if self.containers().is_empty() {
+            return Ok(());
         }
 
-        if let Some(floating_window) = floating_window {
-            self.set_maximized_window(Option::from(floating_window));
-            self.set_maximized_window_restore_idx(Option::from(focused_idx));
-            if let Some(window) = self.maximized_window() {
+        self.reintegrate_monocle_container()?;
+
+        let new_idx = self
+            .new_idx_for_cycle_direction(direction)
+            .ok_or_eyre("there is no container to cycle monocle to")?;
+
+        self.focus_container(new_idx);
+        self.new_monocle_container()?;
+
+        Ok(())
+    }
+
+    pub fn new_maximized_window(&mut self) -> eyre::Result<()> {
+        let focused_idx = self.focused_container_idx();
+
+        if matches!(self.layer, WorkspaceLayer::Floating) {
+            let floating_window_idx = self.focused_floating_window_idx();
+            let floating_window = self.floating_windows_mut().remove(floating_window_idx);
+            self.maximized_window = floating_window;
+            self.maximized_window_restore_idx = Option::from(focused_idx);
+            if let Some(window) = self.maximized_window {
                 window.maximize();
             }
 
             return Ok(());
         }
 
-        let monocle_restore_idx = self.monocle_container_restore_idx();
-        if let Some(monocle_container) = self.monocle_container_mut() {
+        let monocle_restore_idx = self.monocle_container_restore_idx;
+        if let Some(monocle_container) = &mut self.monocle_container {
             let window = monocle_container
                 .remove_focused_window()
-                .ok_or_else(|| anyhow!("there is no window"))?;
+                .ok_or_eyre("there is no window")?;
 
             if monocle_container.windows().is_empty() {
-                self.set_monocle_container(None);
-                self.set_monocle_container_restore_idx(None);
+                self.monocle_container = None;
+                self.monocle_container_restore_idx = None;
             } else {
                 monocle_container.load_focused_window();
             }
 
-            self.set_maximized_window(Option::from(window));
-            self.set_maximized_window_restore_idx(monocle_restore_idx);
-            if let Some(window) = self.maximized_window() {
+            self.maximized_window = Option::from(window);
+            self.maximized_window_restore_idx = monocle_restore_idx;
+            if let Some(window) = self.maximized_window {
                 window.maximize();
             }
 
@@ -1489,25 +1907,28 @@ impl Workspace {
 
         let container = self
             .focused_container_mut()
-            .ok_or_else(|| anyhow!("there is no container"))?;
+            .ok_or_eyre("there is no container")?;
 
         let window = container
             .remove_focused_window()
-            .ok_or_else(|| anyhow!("there is no window"))?;
+            .ok_or_eyre("there is no window")?;
 
         if container.windows().is_empty() {
+            // we shouldn't use remove_container_by_idx here because it doesn't make sense for
+            // monocle and maximized toggles which take over the whole screen before being reinserted
+            // at the same index to respect locked container indexes
             self.containers_mut().remove(focused_idx);
-            if self.resize_dimensions().get(focused_idx).is_some() {
-                self.resize_dimensions_mut().remove(focused_idx);
+            if self.resize_dimensions.get(focused_idx).is_some() {
+                self.resize_dimensions.remove(focused_idx);
             }
         } else {
             container.load_focused_window();
         }
 
-        self.set_maximized_window(Option::from(window));
-        self.set_maximized_window_restore_idx(Option::from(focused_idx));
+        self.maximized_window = Option::from(window);
+        self.maximized_window_restore_idx = Option::from(focused_idx);
 
-        if let Some(window) = self.maximized_window() {
+        if let Some(window) = self.maximized_window {
             window.maximize();
         }
 
@@ -1516,15 +1937,15 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn reintegrate_maximized_window(&mut self) -> Result<()> {
+    pub fn reintegrate_maximized_window(&mut self) -> eyre::Result<()> {
         let restore_idx = self
-            .maximized_window_restore_idx()
-            .ok_or_else(|| anyhow!("there is no monocle restore index"))?;
+            .maximized_window_restore_idx
+            .ok_or_eyre("there is no monocle restore index")?;
 
         let window = self
-            .maximized_window()
+            .maximized_window
             .as_ref()
-            .ok_or_else(|| anyhow!("there is no monocle container"))?;
+            .ok_or_eyre("there is no monocle container")?;
 
         let window = *window;
         if !self.containers().is_empty() && restore_idx > self.containers().len().saturating_sub(1)
@@ -1535,16 +1956,19 @@ impl Workspace {
 
         let mut container = Container::default();
         container.windows_mut().push_back(window);
-        self.containers_mut().insert(restore_idx, container);
 
+        // we shouldn't use insert_container_at_index here because it doesn't make sense for
+        // monocle and maximized toggles which take over the whole screen before being reinserted
+        // at the same index to respect locked container indexes
+        self.containers_mut().insert(restore_idx, container);
         self.focus_container(restore_idx);
 
         self.focused_container_mut()
-            .ok_or_else(|| anyhow!("there is no container"))?
+            .ok_or_eyre("there is no container")?
             .load_focused_window();
 
-        self.set_maximized_window(None);
-        self.set_maximized_window_restore_idx(None);
+        self.maximized_window = None;
+        self.maximized_window_restore_idx = None;
 
         Ok(())
     }
@@ -1557,7 +1981,7 @@ impl Workspace {
     }
 
     pub fn swap_containers(&mut self, i: usize, j: usize) {
-        self.containers.swap(i, j);
+        self.containers.elements_mut().swap_respecting_locks(i, j);
         self.focus_container(j);
     }
 
@@ -1565,7 +1989,7 @@ impl Workspace {
         let hwnd = WindowsApi::foreground_window().ok()?;
 
         let mut idx = None;
-        for (i, window) in self.floating_windows.iter().enumerate() {
+        for (i, window) in self.floating_windows().iter().enumerate() {
             if hwnd == window.hwnd {
                 idx = Option::from(i);
             }
@@ -1574,8 +1998,8 @@ impl Workspace {
         match idx {
             None => None,
             Some(idx) => {
-                if self.floating_windows.get(idx).is_some() {
-                    Option::from(self.floating_windows_mut().remove(idx))
+                if self.floating_windows().get(idx).is_some() {
+                    self.floating_windows_mut().remove(idx)
                 } else {
                     None
                 }
@@ -1586,9 +2010,9 @@ impl Workspace {
     pub fn visible_windows(&self) -> Vec<Option<&Window>> {
         let mut vec = vec![];
 
-        vec.push(self.maximized_window().as_ref());
+        vec.push(self.maximized_window.as_ref());
 
-        if let Some(monocle) = self.monocle_container() {
+        if let Some(monocle) = &self.monocle_container {
             vec.push(monocle.focused_window());
         }
 
@@ -1603,28 +2027,81 @@ impl Workspace {
         vec
     }
 
+    /// The windows that are on show, which are the ones to slide when the
+    /// workspace is switched
+    pub fn windows_on_show(&self) -> Vec<Window> {
+        if let Some(monocle) = &self.monocle_container {
+            return monocle.focused_window().copied().into_iter().collect();
+        }
+
+        self.visible_windows()
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect()
+    }
+
+    /// What kind of border each of the windows that are on show has
+    pub fn border_kinds_on_show(&self) -> Vec<(isize, WindowKind)> {
+        if let Some(monocle) = &self.monocle_container {
+            return monocle
+                .focused_window()
+                .map(|window| (window.hwnd, WindowKind::Monocle))
+                .into_iter()
+                .collect();
+        }
+
+        let mut kinds: Vec<(isize, WindowKind)> = self
+            .containers()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, container)| {
+                let kind = if idx != self.focused_container_idx() {
+                    if container.locked {
+                        WindowKind::UnfocusedLocked
+                    } else {
+                        WindowKind::Unfocused
+                    }
+                } else if container.windows().len() > 1 {
+                    WindowKind::Stack
+                } else {
+                    WindowKind::Single
+                };
+
+                container.focused_window().map(|window| (window.hwnd, kind))
+            })
+            .collect();
+
+        kinds.extend(
+            self.floating_windows()
+                .iter()
+                .map(|window| (window.hwnd, WindowKind::Unfocused)),
+        );
+
+        kinds
+    }
+
     pub fn visible_window_details(&self) -> Vec<WindowDetails> {
         let mut vec: Vec<WindowDetails> = vec![];
 
-        if let Some(maximized) = self.maximized_window() {
-            if let Ok(details) = (*maximized).try_into() {
-                vec.push(details);
-            }
+        if let Some(maximized) = self.maximized_window
+            && let Ok(details) = (maximized).try_into()
+        {
+            vec.push(details);
         }
 
-        if let Some(monocle) = self.monocle_container() {
-            if let Some(focused) = monocle.focused_window() {
-                if let Ok(details) = (*focused).try_into() {
-                    vec.push(details);
-                }
-            }
+        if let Some(monocle) = &self.monocle_container
+            && let Some(focused) = monocle.focused_window()
+            && let Ok(details) = (*focused).try_into()
+        {
+            vec.push(details);
         }
 
         for container in self.containers() {
-            if let Some(focused) = container.focused_window() {
-                if let Ok(details) = (*focused).try_into() {
-                    vec.push(details);
-                }
+            if let Some(focused) = container.focused_window()
+                && let Ok(details) = (*focused).try_into()
+            {
+                vec.push(details);
             }
         }
 
@@ -1654,6 +2131,157 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Window;
+    use crate::container::Container;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_locked_containers_with_new_window() {
+        let mut ws = Workspace::default();
+
+        let mut state = HashMap::new();
+
+        // add 4 containers
+        for i in 0..4 {
+            let mut container = Container::default();
+            if i == 3 {
+                container.locked = true; // set index 3 locked
+            }
+            state.insert(i, container.id.to_string());
+            ws.add_container_to_back(container);
+        }
+        assert_eq!(ws.containers().len(), 4);
+
+        // focus container at index 2
+        ws.focus_container(2);
+
+        // simulate a new window being launched on this workspace
+        ws.new_container_for_window(Window::from(123));
+
+        // new length should be 5, with the focus on the new window at index 4
+        assert_eq!(ws.containers().len(), 5);
+        assert_eq!(ws.focused_container_idx(), 4);
+        assert_eq!(
+            ws.focused_container()
+                .unwrap()
+                .focused_window()
+                .unwrap()
+                .hwnd,
+            123
+        );
+
+        // when inserting a new container at index 0, index 3's container should not change
+        ws.focus_container(0);
+        ws.new_container_for_window(Window::from(234));
+        assert_eq!(
+            ws.containers()[3].id.to_string(),
+            state.get(&3).unwrap().to_string()
+        );
+    }
+
+    #[test]
+    fn test_locked_containers_remove_window() {
+        let mut ws = Workspace::default();
+
+        // add 4 containers
+        for i in 0..4 {
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(i));
+            if i == 1 {
+                container.locked = true;
+            }
+            ws.add_container_to_back(container);
+        }
+        assert_eq!(ws.containers().len(), 4);
+
+        ws.remove_window(0).unwrap();
+        assert_eq!(ws.containers()[0].focused_window().unwrap().hwnd, 2);
+        // index 1 should still be the same
+        assert_eq!(ws.containers()[1].focused_window().unwrap().hwnd, 1);
+        assert_eq!(ws.containers()[2].focused_window().unwrap().hwnd, 3);
+    }
+
+    #[test]
+    fn test_locked_containers_toggle_float() {
+        let mut ws = Workspace::default();
+
+        // add 4 containers
+        for i in 0..4 {
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(i));
+            if i == 1 {
+                container.locked = true;
+            }
+            ws.add_container_to_back(container);
+        }
+        assert_eq!(ws.containers().len(), 4);
+
+        // set index 0 focused
+        ws.focus_container(0);
+
+        // float index 0
+        ws.new_floating_window().unwrap();
+
+        assert_eq!(ws.containers()[0].focused_window().unwrap().hwnd, 2);
+        // index 1 should still be the same
+        assert_eq!(ws.containers()[1].focused_window().unwrap().hwnd, 1);
+        assert_eq!(ws.containers()[2].focused_window().unwrap().hwnd, 3);
+
+        // unfloat - have to do this semi-manually becuase of calls to WindowsApi in
+        // new_container_for_floating_window which usually handles unfloating
+        let window = ws.floating_windows_mut().pop_back().unwrap();
+        let mut container = Container::default();
+        container.add_window(window);
+        ws.insert_container_at_idx(ws.focused_container_idx(), container);
+
+        // all indexes should be at their original position
+        for i in 0..4 {
+            assert_eq!(
+                ws.containers()[i].focused_window().unwrap().hwnd,
+                i as isize
+            );
+        }
+    }
+
+    #[test]
+    fn test_locked_containers_stack() {
+        let mut ws = Workspace::default();
+
+        // add 6 containers
+        for i in 0..6 {
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(i));
+            if i == 4 {
+                container.locked = true;
+            }
+            ws.add_container_to_back(container);
+        }
+        assert_eq!(ws.containers().len(), 6);
+
+        // set index 3 focused
+        ws.focus_container(3);
+
+        // stack index 3 on top of index 2
+        ws.move_window_to_container(2).unwrap();
+
+        assert_eq!(ws.containers()[0].focused_window().unwrap().hwnd, 0);
+        assert_eq!(ws.containers()[1].focused_window().unwrap().hwnd, 1);
+        assert_eq!(ws.containers()[2].windows().len(), 2);
+        assert_eq!(ws.containers()[3].focused_window().unwrap().hwnd, 5);
+        // index 4 should still be the same
+        assert_eq!(ws.containers()[4].focused_window().unwrap().hwnd, 4);
+
+        // unstack
+        ws.new_container_for_focused_window().unwrap();
+
+        // all indexes should be at their original position
+        for i in 0..6 {
+            assert_eq!(
+                ws.containers()[i].focused_window().unwrap().hwnd,
+                i as isize
+            )
+        }
+    }
 
     #[test]
     fn test_contains_window() {
@@ -1733,6 +2361,33 @@ mod tests {
     }
 
     #[test]
+    fn test_remove_non_existent_window() {
+        let mut workspace = Workspace::default();
+
+        {
+            // Add a container with one window
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(1));
+            workspace.add_container_to_back(container);
+        }
+
+        // Attempt to remove a non-existent window
+        let result = workspace.remove_window(2);
+
+        // Should return an error
+        assert!(
+            result.is_err(),
+            "Expected an error when removing a non-existent window"
+        );
+
+        // Get focused container. Should be the index of the last container added
+        let container = workspace.focused_container_mut().unwrap();
+
+        // Should still have 1 window
+        assert_eq!(container.windows().len(), 1);
+    }
+
+    #[test]
     fn test_remove_focused_container() {
         let mut workspace = Workspace::default();
 
@@ -1767,9 +2422,11 @@ mod tests {
 
         // Ensure the container at index 1 before removal is no longer present
         assert!(container_to_remove.is_some());
-        assert!(!workspace
-            .containers()
-            .contains(&container_to_remove.unwrap()));
+        assert!(
+            !workspace
+                .containers()
+                .contains(&container_to_remove.unwrap())
+        );
     }
 
     #[test]
@@ -1825,9 +2482,11 @@ mod tests {
 
         // Ensure the container at index 1 before removal is no longer present
         assert!(container_to_remove.is_some());
-        assert!(!workspace
-            .containers()
-            .contains(&container_to_remove.unwrap()));
+        assert!(
+            !workspace
+                .containers()
+                .contains(&container_to_remove.unwrap())
+        );
     }
 
     #[test]
@@ -1860,9 +2519,11 @@ mod tests {
 
         // Ensure the container at index 1 before removal is no longer present
         assert!(container_to_remove.is_some());
-        assert!(!workspace
-            .containers()
-            .contains(&container_to_remove.unwrap()));
+        assert!(
+            !workspace
+                .containers()
+                .contains(&container_to_remove.unwrap())
+        );
     }
 
     #[test]
@@ -2058,6 +2719,25 @@ mod tests {
     }
 
     #[test]
+    fn test_move_window_to_non_existent_container() {
+        let mut workspace = Workspace::default();
+
+        // Add a container with one window
+        let mut container = Container::default();
+        container.windows_mut().push_back(Window::from(1));
+        workspace.add_container_to_back(container);
+
+        // Try to move window to a non-existent container
+        let result = workspace.move_window_to_container(8);
+
+        // Should return an error
+        assert!(
+            result.is_err(),
+            "Expected an error when moving a window to a non-existent container"
+        );
+    }
+
+    #[test]
     fn test_remove_window() {
         let mut workspace = Workspace::default();
 
@@ -2106,6 +2786,150 @@ mod tests {
             let container = workspace.focused_container_mut().unwrap();
             assert_eq!(container.windows().len(), 1);
             assert!(workspace.contains_window(0));
+        }
+    }
+
+    #[test]
+    fn test_focus_container_by_window() {
+        let mut workspace = Workspace::default();
+
+        {
+            // Container with 3 windows
+            let mut container = Container::default();
+            for i in 0..3 {
+                container.windows_mut().push_back(Window::from(i));
+            }
+            workspace.add_container_to_back(container);
+        }
+
+        {
+            // Container with 1 window
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(4));
+            workspace.add_container_to_back(container);
+        }
+
+        // Focus container by window
+        workspace.focus_container_by_window(1).unwrap();
+
+        // Should be focused on workspace 0
+        assert_eq!(workspace.focused_container_idx(), 0);
+
+        // Should be focused on window 1 and hwnd should be 1
+        let focused_container = workspace.focused_container_mut().unwrap();
+        assert_eq!(
+            focused_container.focused_window(),
+            Some(&Window { hwnd: 1 })
+        );
+        assert_eq!(focused_container.focused_window_idx(), 1);
+    }
+
+    #[test]
+    fn test_contains_managed_window() {
+        let mut workspace = Workspace::default();
+
+        {
+            // Container with 3 windows
+            let mut container = Container::default();
+            for i in 0..3 {
+                container.windows_mut().push_back(Window::from(i));
+            }
+            workspace.add_container_to_back(container);
+        }
+
+        {
+            // Container with 1 window
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(4));
+            workspace.add_container_to_back(container);
+        }
+
+        // Should return true, window is in container 1
+        assert!(workspace.contains_managed_window(4));
+
+        // Should return true, all the windows are in container 0
+        for i in 0..3 {
+            assert!(workspace.contains_managed_window(i));
+        }
+
+        // Should return false since window was never added
+        assert!(!workspace.contains_managed_window(5));
+    }
+
+    #[test]
+    fn test_new_floating_window() {
+        let mut workspace = Workspace::default();
+
+        {
+            // Container with 3 windows
+            let mut container = Container::default();
+            for i in 0..3 {
+                container.windows_mut().push_back(Window::from(i));
+            }
+            workspace.add_container_to_back(container);
+        }
+
+        // Add window to floating_windows
+        workspace.new_floating_window().ok();
+
+        // Should have 1 floating window
+        assert_eq!(workspace.floating_windows().len(), 1);
+
+        // Should have only 2 windows now
+        let container = workspace.focused_container_mut().unwrap();
+        assert_eq!(container.windows().len(), 2);
+
+        // Should contain hwnd 0 since this is the first window in the container
+        let floating_windows = workspace.floating_windows_mut();
+        assert!(floating_windows.contains(&Window { hwnd: 0 }));
+    }
+
+    #[test]
+    fn test_visible_windows() {
+        let mut workspace = Workspace::default();
+
+        {
+            // Create and add a default Container with 2 windows
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(100));
+            container.windows_mut().push_back(Window::from(200));
+            workspace.add_container_to_back(container);
+        }
+
+        {
+            // visible_windows should return None and 100
+            let visible_windows = workspace.visible_windows();
+            assert_eq!(visible_windows.len(), 2);
+            assert!(visible_windows[0].is_none());
+            assert_eq!(visible_windows[1].unwrap().hwnd, 100);
+        }
+
+        {
+            // Create and add a default Container with 1 window
+            let mut container = Container::default();
+            container.windows_mut().push_back(Window::from(300));
+            workspace.add_container_to_back(container);
+        }
+
+        {
+            // visible_windows should return None, 100, and 300
+            let visible_windows = workspace.visible_windows();
+            assert_eq!(visible_windows.len(), 3);
+            assert!(visible_windows[0].is_none());
+            assert_eq!(visible_windows[1].unwrap().hwnd, 100);
+            assert_eq!(visible_windows[2].unwrap().hwnd, 300);
+        }
+
+        // Maximize window 200
+        workspace.maximized_window = Some(Window { hwnd: 200 });
+
+        {
+            // visible_windows should return 200, 100, and 300
+            let visible_windows = workspace.visible_windows();
+            assert_eq!(visible_windows.len(), 3);
+            assert_eq!(visible_windows[0].unwrap().hwnd, 200);
+            assert_eq!(visible_windows[1].unwrap().hwnd, 100);
+            assert_eq!(visible_windows[2].unwrap().hwnd, 300);
         }
     }
 }

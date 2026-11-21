@@ -1,18 +1,34 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ApplicationSpecificConfiguration",
   "type": "object",
   "additionalProperties": {
-    "$ref": "#/definitions/AscApplicationRulesOrSchema"
+    "$ref": "#/$defs/AscApplicationRulesOrSchema"
   },
-  "definitions": {
+  "$defs": {
     "ApplicationIdentifier": {
-      "type": "string",
-      "enum": [
-        "Exe",
-        "Class",
-        "Title",
-        "Path"
+      "description": "Application identifier",
+      "oneOf": [
+        {
+          "description": "Executable name",
+          "type": "string",
+          "const": "Exe"
+        },
+        {
+          "description": "Class",
+          "type": "string",
+          "const": "Class"
+        },
+        {
+          "description": "Window title",
+          "type": "string",
+          "const": "Title"
+        },
+        {
+          "description": "Executable path",
+          "type": "string",
+          "const": "Path"
+        }
       ]
     },
     "AscApplicationRules": {
@@ -26,7 +42,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "ignore": {
@@ -36,7 +52,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "layered": {
@@ -46,7 +62,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "manage": {
@@ -56,7 +72,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "object_name_change": {
@@ -66,7 +82,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "slow_application": {
@@ -76,7 +92,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "transparency_ignore": {
@@ -86,7 +102,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         },
         "tray_and_multi_window": {
@@ -96,7 +112,7 @@
             "null"
           ],
           "items": {
-            "$ref": "#/definitions/MatchingRule"
+            "$ref": "#/$defs/MatchingRule"
           }
         }
       }
@@ -104,7 +120,7 @@
     "AscApplicationRulesOrSchema": {
       "anyOf": [
         {
-          "$ref": "#/definitions/AscApplicationRules"
+          "$ref": "#/$defs/AscApplicationRules"
         },
         {
           "type": "string"
@@ -112,56 +128,103 @@
       ]
     },
     "IdWithIdentifier": {
+      "description": "Rule for matching applications",
       "type": "object",
-      "required": [
-        "id",
-        "kind"
-      ],
       "properties": {
         "id": {
+          "description": "Target identifier",
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/ApplicationIdentifier"
+          "description": "Kind of identifier to target",
+          "$ref": "#/$defs/ApplicationIdentifier"
         },
         "matching_strategy": {
+          "description": "Matching strategy to use",
           "anyOf": [
             {
-              "$ref": "#/definitions/MatchingStrategy"
+              "$ref": "#/$defs/MatchingStrategy"
             },
             {
               "type": "null"
             }
           ]
         }
-      }
+      },
+      "required": [
+        "kind",
+        "id"
+      ]
     },
     "MatchingRule": {
+      "description": "Rule for matching applications",
       "anyOf": [
         {
-          "$ref": "#/definitions/IdWithIdentifier"
+          "description": "Simple matching rule which must evaluate to true",
+          "$ref": "#/$defs/IdWithIdentifier"
         },
         {
+          "description": "Composite matching rule where all conditions must evaluate to true",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/IdWithIdentifier"
+            "$ref": "#/$defs/IdWithIdentifier"
           }
         }
       ]
     },
     "MatchingStrategy": {
-      "type": "string",
-      "enum": [
-        "Legacy",
-        "Equals",
-        "StartsWith",
-        "EndsWith",
-        "Contains",
-        "Regex",
-        "DoesNotEndWith",
-        "DoesNotStartWith",
-        "DoesNotEqual",
-        "DoesNotContain"
+      "description": "Strategy for matching identifiers",
+      "oneOf": [
+        {
+          "description": "Should not be used, only kept for backward compatibility",
+          "type": "string",
+          "const": "Legacy"
+        },
+        {
+          "description": "Equals",
+          "type": "string",
+          "const": "Equals"
+        },
+        {
+          "description": "Starts With",
+          "type": "string",
+          "const": "StartsWith"
+        },
+        {
+          "description": "Ends With",
+          "type": "string",
+          "const": "EndsWith"
+        },
+        {
+          "description": "Contains",
+          "type": "string",
+          "const": "Contains"
+        },
+        {
+          "description": "Regex",
+          "type": "string",
+          "const": "Regex"
+        },
+        {
+          "description": "Does not end with",
+          "type": "string",
+          "const": "DoesNotEndWith"
+        },
+        {
+          "description": "Does not start with",
+          "type": "string",
+          "const": "DoesNotStartWith"
+        },
+        {
+          "description": "Does not equal",
+          "type": "string",
+          "const": "DoesNotEqual"
+        },
+        {
+          "description": "Does not contain",
+          "type": "string",
+          "const": "DoesNotContain"
+        }
       ]
     }
   }

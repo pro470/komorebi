@@ -16,12 +16,28 @@ the example files have been downloaded. For most new users this will be in the
 komorebic quickstart
 ```
 
+## Corporate Devices Enrolled in MDM
+
+If you are using `komorebi` on a corporate device enrolled in mobile device
+management, you will receive a pop-up when you run `komorebic start` reminding
+you that the [Komorebi License](https://github.com/LGUG2Z/komorebi-license) does
+not permit any kind of commercial use.
+
+You can remove this pop-up by running `komorebic license <email>` with the email
+associated with your Individual Commercial Use License. A single HTTP request
+will be sent with the given email address to verify license validity.
+
+## Starting komorebi
+
 With the example configurations downloaded, you can now start `komorebi`,
 `komorebi-bar` and `whkd`.
 
 ```powershell
 komorebic start --whkd --bar
 ```
+
+If you don't want to use the komorebi status bar, you can remove the `--bar` option
+from the above command.
 
 ## komorebi.json
 
@@ -67,7 +83,7 @@ is a crude hack trying to compensate for the insistence of Microsoft Windows
 design teams to make custom borders with widths that are actually visible to
 the user a thing of the past and removing this capability from the Win32 API.
 
-I know it's buggy, and I know that most of the it sucks, but this is something
+I know it's buggy, and I know that most of the time it sucks, but this is something
 you should be bring up with the billion dollar company and not with me, the
 solo developer.
 
@@ -185,6 +201,9 @@ As of [`v0.2.4`](https://github.com/LGUG2Z/whkd/releases/tag/v0.2.4), `whkd` can
 limitations on hotkey bindings that include the `win` key. However, you will still need
 to [modify the registry](https://superuser.com/questions/1059511/how-to-disable-winl-in-windows-10) to prevent
 `win + l` from locking the operating system.
+
+You can toggle an overlay of the current `whkdrc` shortcuts related to `komorebi` at any time when using the example
+configuration with `alt + i`.
 
 ```
 {% include "./whkdrc.sample" %}
